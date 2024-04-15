@@ -1,134 +1,13 @@
-use bevy::{
-    math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume},
-    prelude::*,
-    render::render_resource::ShaderType,
-    sprite::MaterialMesh2dBundle,
-};
+use bevy::prelude::*;
 
+mod components;
+mod constants;
 mod stepping;
+mod systems;
 
-const CAR_SPAWN_BOTTOM: f32 = -300.0;
-
-const CAR_SIZE: Vec3 = Vec3::new(20.0, 40.0, 0.0);
-const CAR_INITIAL_VELOCITY: Vec2 = Vec2::new(0.0, 0.5);
-const CAR_SPEED: f32 = 400.0;
-const CAR_GAS_POWER: f32 = 10.0; // how much velocity the car gains per frame
-const CAR_BRAKE_POWER: f32 = 12.0;
-
-const FRICTION_DECAY: f32 = 0.996;
-
-const BACKGROUND_COLOR: Color = Color::rgb(0.9, 0.9, 0.9);
-const CAR_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
-const SCORE_COLOR: Color = Color::rgb(1.0, 0.5, 0.5);
-const TEXT_COLOR: Color = Color::rgb(0.5, 0.5, 1.0);
-const WALL_COLOR: Color = Color::rgb(0.8, 0.8, 0.8);
-
-const SCOREBOARD_FONT_SIZE: f32 = 40.0;
-const SCOREBOARD_TEXT_PADDING: Val = Val::Px(5.0);
-
-const WALL_THICKNESS: f32 = 10.0;
-// x coordinates
-const LEFT_WALL: f32 = -450.;
-const RIGHT_WALL: f32 = 450.;
-// y coordinates
-const BOTTOM_WALL: f32 = -300.;
-const TOP_WALL: f32 = 300.;
-
-// COMPONENTS
-#[derive(Component)]
-struct Car;
-
-#[derive(Component)]
-struct Collider;
-
-#[derive(Component, Deref, DerefMut)]
-struct Velocity(Vec2);
-
-#[derive(Component)]
-struct Friction;
-
-#[derive(Component)]
-struct ScoreboardUi;
-
-// RESOURCES
-#[derive(Resource)]
-struct CollisionSound(Handle<AudioSource>);
-
-#[derive(Resource)]
-struct Scoreboard {
-    score: usize,
-}
-
-// EVENTS
-#[derive(Event, Default)]
-struct CollisionEvent;
-
-// BUNDLES
-#[derive(Bundle)]
-struct WallBundle {
-    sprite_bundle: SpriteBundle,
-    collider: Collider,
-}
-
-enum WallLocation {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl WallLocation {
-    fn position(&self) -> Vec2 {
-        match self {
-            WallLocation::Left => Vec2::new(LEFT_WALL, 0.),
-            WallLocation::Right => Vec2::new(RIGHT_WALL, 0.),
-            WallLocation::Top => Vec2::new(0., TOP_WALL),
-            WallLocation::Bottom => Vec2::new(0., BOTTOM_WALL),
-        }
-    }
-
-    fn size(&self) -> Vec2 {
-        let arena_height = TOP_WALL - BOTTOM_WALL;
-        let arena_width = RIGHT_WALL - LEFT_WALL;
-
-        assert!(arena_height > 0.0);
-        assert!(arena_width > 0.0);
-
-        match self {
-            WallLocation::Left | WallLocation::Right => {
-                Vec2::new(WALL_THICKNESS, arena_height + WALL_THICKNESS)
-            }
-            WallLocation::Top | WallLocation::Bottom => {
-                Vec2::new(arena_width + WALL_THICKNESS, WALL_THICKNESS)
-            }
-        }
-    }
-}
-
-impl WallBundle {
-    fn new(location: WallLocation) -> WallBundle {
-        WallBundle {
-            sprite_bundle: SpriteBundle {
-                transform: Transform {
-                    // We need to convert our Vec2 into a Vec3, by giving it a z-coordinate
-                    // This is used to determine the order of our sprites
-                    translation: location.position().extend(0.0),
-                    // The z-scale of 2D objects must always be 1.0,
-                    // or their ordering will be affected in surprising ways.
-                    // See https://github.com/bevyengine/bevy/issues/4149
-                    scale: location.size().extend(1.0),
-                    ..default()
-                },
-                sprite: Sprite {
-                    color: WALL_COLOR,
-                    ..default()
-                },
-                ..default()
-            },
-            collider: Collider,
-        }
-    }
-}
+use crate::components::*;
+use crate::constants::*;
+use crate::systems::*;
 
 fn main() {
     App::new()
@@ -139,17 +18,19 @@ fn main() {
                 .add_schedule(FixedUpdate)
                 .at(Val::Percent(35.0), Val::Percent(50.0)),
         )
-        .insert_resource(Scoreboard { score: 0 })
-        .insert_resource(ClearColor(BACKGROUND_COLOR))
-        .add_event::<CollisionEvent>()
+        .insert_resource(components::Scoreboard { score: 0 })
+        .insert_resource(ClearColor(constants::BACKGROUND_COLOR))
+        .add_event::<components::CollisionEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
             (
-                take_input,
-                apply_friction,
-                apply_velocity,
-                wrap_position,
+                systems::keyboard_input_system,
+                systems::mouse_click_system,
+                systems::cursor_position,
+                systems::apply_friction,
+                systems::apply_velocity,
+                systems::wrap_position,
                 //check_for_collisions, play_collision_sound
             )
                 .chain(),
@@ -172,7 +53,7 @@ fn setup(
     commands.insert_resource(CollisionSound(ball_collision_sound));
 
     // Car
-    let car_y = CAR_SPAWN_BOTTOM;
+    let car_y = constants::CAR_SPAWN_BOTTOM;
 
     commands.spawn((
         SpriteBundle {
@@ -193,7 +74,7 @@ fn setup(
         Friction, // TODO: car bundle
     ));
 
-    // Scoreboard
+    // components::Scoreboard
     commands.spawn((
         ScoreboardUi,
         TextBundle::from_sections([
@@ -224,62 +105,44 @@ fn setup(
     commands.spawn(WallBundle::new(WallLocation::Right));
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
+
+    // Lanes
+    spawn_lanes(&mut commands);
 }
 
-fn apply_friction(mut query: Query<&mut Velocity, With<Friction>>) {
-    for mut velocity in &mut query {
-        println!(
-            "velocity.y={} *= {} = {}",
-            velocity.y,
-            FRICTION_DECAY,
-            velocity.y * FRICTION_DECAY
-        );
+fn spawn_lanes(commands: &mut Commands) {
+    let total_width = RIGHT_WALL - LEFT_WALL;
+    let total_height = TOP_WALL - BOTTOM_WALL;
 
-        velocity.x *= FRICTION_DECAY;
-        velocity.y *= FRICTION_DECAY;
+    let num_lanes: i32 = f32::floor(total_width / LANE_WIDTH) as i32;
+    let num_lane_segments: i32 = f32::floor(total_height / LANE_STRIP_SIZE.y) as i32;
 
-        println!("Friction slowed me down to {:?}", velocity.0);
-    }
-}
+    for i in 0..num_lanes {
+        let lane_x = lane_to_screen_pos(i + 1).x;
 
-fn apply_velocity(mut query: Query<(&mut Transform, &Velocity)>, time: Res<Time>) {
-    for (mut transform, velocity) in &mut query {
-        transform.translation.x += velocity.x * time.delta_seconds();
-        transform.translation.y += velocity.y * time.delta_seconds();
-    }
-}
+        for j in 0..num_lane_segments {
+            if j % 3 != 0 {
+                // every third; dotted line
+                continue;
+            }
 
-fn wrap_position(mut query: Query<&mut Transform, With<Velocity>>) {
-    for mut transform in &mut query {
-        if transform.translation.y > TOP_WALL - (transform.scale.y / 2.0) {
-            transform.translation.y = BOTTOM_WALL + (transform.scale.y / 2.0);
+            let lane_y = BOTTOM_WALL + LANE_STRIP_SIZE.y * j as f32;
+
+            println!("spawning lane strip at {}:{}", lane_x, lane_y);
+
+            commands.spawn(SpriteBundle {
+                transform: Transform {
+                    translation: Vec3::new(lane_x, lane_y, 0.0),
+                    scale: LANE_STRIP_SIZE,
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: STRIPE_COLOR,
+                    ..default()
+                },
+                ..default()
+            });
         }
-    }
-}
-
-fn update_scoreboard(scoreboard: Res<Scoreboard>, mut query: Query<&mut Text, With<ScoreboardUi>>) {
-    let mut text = query.single_mut();
-    text.sections[1].value = scoreboard.score.to_string();
-}
-
-fn take_input(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut cars: Query<(&mut Velocity, &mut Sprite), With<Car>>,
-) {
-    let mut car = cars.single_mut();
-
-    if keyboard_input.pressed(KeyCode::ArrowUp) {
-        println!("VROOM {}", car.0.y);
-        car.0.y += CAR_GAS_POWER;
-        car.1.color = Color::GREEN;
-    } else if keyboard_input.pressed(KeyCode::ArrowDown) {
-        println!("SKRRR {}", car.0.y);
-        car.0.y -= CAR_BRAKE_POWER;
-        car.0.y = f32::max(car.0.y, 0.0);
-
-        car.1.color = Color::RED;
-    } else {
-        car.1.color = CAR_COLOR;
     }
 }
 
