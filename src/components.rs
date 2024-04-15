@@ -1,6 +1,11 @@
 use bevy::prelude::*;
 
 use crate::constants::*;
+use crate::util::*;
+
+pub struct CollisionInformation {
+    pub front_distance: f32, // -1 if no collision, else distance to closest car in front
+}
 
 // COMPONENTS
 #[derive(Component)]
@@ -21,6 +26,19 @@ pub struct ScoreboardUi;
 #[derive(Component)]
 pub struct Lane(pub Vec2);
 
+#[derive(Component)]
+pub struct DriverAgent {
+    pub driver_state: DriverState,
+    pub lane_target: i32,
+    pub collision_information: CollisionInformation,
+    pub order: DriverOrder,
+    pub temperament: DriverTemperament,
+    pub patience: DriverPatience,
+}
+
+#[derive(Component)]
+pub struct LaneChanger;
+
 // RESOURCES
 #[derive(Resource)]
 pub struct CollisionSound(pub Handle<AudioSource>);
@@ -36,44 +54,88 @@ pub struct CollisionEvent;
 
 // BUNDLES
 #[derive(Bundle)]
+pub struct CarBundle {
+    car: Car,
+    sprite_bundle: SpriteBundle,
+    collider: Collider,
+    velocity: Velocity,
+    friction: Friction,
+    driver_agent: DriverAgent,
+}
+
+impl CarBundle {
+    pub fn new(position: Vec3) -> CarBundle {
+        CarBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: position,
+                    scale: CAR_SIZE,
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: CAR_COLOR,
+                    ..default()
+                },
+                ..default()
+            },
+            car: Car,
+            collider: Collider,
+            velocity: Velocity(CAR_INITIAL_DIRECTION),
+            friction: Friction,
+            driver_agent: DriverAgent {
+                driver_state: DriverState::Normal,
+                lane_target: -1,
+                collision_information: CollisionInformation {
+                    front_distance: -1.,
+                },
+                order: DriverOrder::Orderly,
+                temperament: DriverTemperament::Calm,
+                patience: DriverPatience::Normal,
+            },
+        }
+    }
+
+    pub fn new_with_behavior(
+        position: Vec3,
+        order: DriverOrder,
+        temperament: DriverTemperament,
+        patience: DriverPatience,
+    ) -> CarBundle {
+        CarBundle {
+            sprite_bundle: SpriteBundle {
+                transform: Transform {
+                    translation: position,
+                    scale: CAR_SIZE,
+                    ..default()
+                },
+                sprite: Sprite {
+                    color: CAR_COLOR,
+                    ..default()
+                },
+                ..default()
+            },
+            car: Car,
+            collider: Collider,
+            velocity: Velocity(CAR_INITIAL_DIRECTION),
+            friction: Friction,
+            driver_agent: DriverAgent {
+                driver_state: DriverState::Normal,
+                lane_target: -1,
+                collision_information: CollisionInformation {
+                    front_distance: -1.,
+                },
+                order,
+                temperament,
+                patience,
+            },
+        }
+    }
+}
+
+#[derive(Bundle)]
 pub struct WallBundle {
     sprite_bundle: SpriteBundle,
     collider: Collider,
-}
-
-pub enum WallLocation {
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-impl WallLocation {
-    pub fn position(&self) -> Vec2 {
-        match self {
-            WallLocation::Left => Vec2::new(LEFT_WALL, 0.),
-            WallLocation::Right => Vec2::new(RIGHT_WALL, 0.),
-            WallLocation::Top => Vec2::new(0., TOP_WALL),
-            WallLocation::Bottom => Vec2::new(0., BOTTOM_WALL),
-        }
-    }
-
-    pub fn size(&self) -> Vec2 {
-        let arena_height = TOP_WALL - BOTTOM_WALL;
-        let arena_width = RIGHT_WALL - LEFT_WALL;
-
-        assert!(arena_height > 0.0);
-        assert!(arena_width > 0.0);
-
-        match self {
-            WallLocation::Left | WallLocation::Right => {
-                Vec2::new(WALL_THICKNESS, arena_height + WALL_THICKNESS)
-            }
-            WallLocation::Top | WallLocation::Bottom => {
-                Vec2::new(arena_width + WALL_THICKNESS, WALL_THICKNESS)
-            }
-        }
-    }
 }
 
 impl WallBundle {
@@ -99,4 +161,23 @@ impl WallBundle {
             collider: Collider,
         }
     }
+}
+
+pub fn spawn_car_at_lane(
+    lane_idx: i32,
+    commands: &mut Commands,
+    order: DriverOrder,
+    temperament: DriverTemperament,
+    patience: DriverPatience,
+) {
+    let car_x = lane_idx_to_center(lane_idx).x;
+    let car_y = CAR_SPAWN_BOTTOM;
+    let car_pos = Vec3::new(car_x, car_y, 0.);
+
+    commands.spawn(CarBundle::new_with_behavior(
+        car_pos,
+        order,
+        temperament,
+        patience,
+    ));
 }
