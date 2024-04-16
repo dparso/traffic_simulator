@@ -38,7 +38,7 @@ pub enum DriverPatience {
 lazy_static! {
     pub static ref DRIVER_TEMPERAMENT_TOP_SPEEDS: HashMap<DriverTemperament, f32> = {
         let mut map = HashMap::new();
-        map.insert(DriverTemperament::Psychotic, 2.);
+        map.insert(DriverTemperament::Psychotic, 1.5);
         map.insert(DriverTemperament::Aggressive, 1.3);
         map.insert(DriverTemperament::Calm, 1.0);
         map.insert(DriverTemperament::Passive, 0.8);
@@ -52,7 +52,19 @@ lazy_static! {
         map.insert(DriverPatience::Wild, 1.0); // always tries to pass
         map
     };
-    pub static ref DRIVER_TEMPERAMENT_DISTANCE_THRESHOLD: HashMap<DriverTemperament, f32> = {
+    pub static ref DRIVER_TEMPERAMENT_BRAKE_THRESHOLD: HashMap<DriverTemperament, f32> = {
+        // values are percentages of car sight length when a car will start braking
+        // e.g., 0.5 means a car won't break until it sees an obstacle within 50% of its sightline.
+        // values over 1.0 are ineffective, as a car cannot see farther than its sightline
+
+        let mut map = HashMap::new();
+        map.insert(DriverTemperament::Psychotic, 0.5);
+        map.insert(DriverTemperament::Aggressive, 0.7);
+        map.insert(DriverTemperament::Calm, 1.0);
+        map.insert(DriverTemperament::Passive, 1.0);
+        map
+    };
+    pub static ref DRIVER_TEMPERAMENT_TAIL_THRESHOLD: HashMap<DriverTemperament, f32> = {
         // values are percentages of one car length that an agent is willing to tail; e.g., 0.5 means
         // a car will get up to 50% of a car length behind another car,
         // while 3.0 means a car will stay 3 car lengths behind another
@@ -64,15 +76,18 @@ lazy_static! {
         map.insert(DriverTemperament::Passive, 5.0);
         map
     };
-
 }
 
 pub fn driver_temperament_top_speed_pct(temperament: &DriverTemperament) -> f32 {
     DRIVER_TEMPERAMENT_TOP_SPEEDS[&temperament]
 }
 
-pub fn driver_temperament_distance_threshold(temperament: &DriverTemperament) -> f32 {
-    DRIVER_TEMPERAMENT_DISTANCE_THRESHOLD[&temperament]
+pub fn driver_temperament_brake_threshold(temperament: &DriverTemperament) -> f32 {
+    DRIVER_TEMPERAMENT_BRAKE_THRESHOLD[&temperament]
+}
+
+pub fn driver_temperament_tail_threshold(temperament: &DriverTemperament) -> f32 {
+    DRIVER_TEMPERAMENT_TAIL_THRESHOLD[&temperament]
 }
 
 pub fn driver_patience_min_speed_pct(patience: &DriverPatience) -> f32 {

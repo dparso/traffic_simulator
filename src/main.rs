@@ -46,11 +46,11 @@ fn main() {
                 systems::keyboard_input_system,
                 systems::mouse_click_system,
                 systems::cursor_position,
+                systems::collision_system,
                 systems::apply_friction,
                 systems::apply_velocity,
                 systems::wrap_position,
                 systems::driver_agent_system,
-                systems::collision_system,
                 // systems::raycast_system,
                 //check_for_collisions, play_collision_sound
             )

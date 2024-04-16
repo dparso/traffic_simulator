@@ -84,8 +84,8 @@ pub fn mouse_click_system(
                 lane_idx,
                 &mut commands,
                 DriverOrder::Orderly,
-                DriverTemperament::Psychotic,
-                DriverPatience::Wild,
+                DriverTemperament::Calm,
+                DriverPatience::Normal,
             );
         }
     }
@@ -137,19 +137,63 @@ fn agent_accelerate_or_brake(agent: &mut DriverAgent, mut velocity: &mut Velocit
 
 fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
     let distance = agent.collision_information.front_distance;
-    let distance_to_brake = CAR_SIZE.y * driver_temperament_distance_threshold(&agent.temperament);
+    let brake_distance_threshold =
+        CAR_SIGHT_DISTANCE * driver_temperament_brake_threshold(&agent.temperament);
 
     println!(
-        "checking distance of collision={} against threshold={} distance_to_brake={}",
+        "checking distance of collision={} against threshold={} brake_distance_threshold={}",
         distance,
-        driver_temperament_distance_threshold(&agent.temperament),
-        distance_to_brake
+        driver_temperament_brake_threshold(&agent.temperament),
+        brake_distance_threshold
     );
 
-    if distance <= distance_to_brake {
-        velocity.y -= CAR_BRAKE_POWER;
-        velocity.y = f32::max(0., velocity.y);
-    }
+    // if distance <= brake_distance_threshold {
+    //     velocity.y -= CAR_BRAKE_POWER;
+    //     velocity.y = f32::max(0., velocity.y);
+    // } else {
+    let previous_distance = agent.collision_information.last_front_distance;
+    let distance_difference = distance - previous_distance;
+
+    let mut velocity_change = CAR_GAS_POWER;
+
+    println!("if distance={distance} <= brake_distance_threshold={brake_distance_threshold}");
+
+    // brake_distance_threshold is the first point at which cars will start to brake
+    // when within brake_distance_threshold AND tail_distance, cars will always brake
+    // when within brake_distance_threshold and outside of tail_distance, cars will
+    // consider the relative speed of the car ahead: if the car is getting closer, brake
+    // if it's pulling away, accelerate
+
+    if distance <= brake_distance_threshold {
+        let tail_threshold = driver_temperament_tail_threshold(&agent.temperament);
+        let tail_distance = CAR_SIZE.y * tail_threshold;
+
+        println!("if distance={distance} < tail_distance={tail_distance} OR if distance_difference={distance_difference} > 0. ");
+
+        if distance < tail_distance {
+            // car ahead is getting closer; don't accelerate as quickly
+            println!("within tail; braking");
+            velocity_change = -CAR_BRAKE_POWER;
+        } else if distance_difference > 0. {
+            // car ahead is moving away; accelerate a bit faster
+            println!("pulling away; accelerating");
+        } else {
+            println!("approaching; braking");
+            velocity_change = -CAR_BRAKE_POWER;
+        }
+    } // else not within braking distance; continue accelerating
+
+    // TODO: all gas power reads should be hidden behind calculator that does agent behavior calcs
+    // let direction = Vec2::new(0., distance_difference).normalize();
+
+    // TODO: this should also be encapsulated
+    velocity.y += velocity_change;
+    velocity.y = f32::max(velocity.y, 0.);
+
+    println!(
+        "distance={} previous_distance={} speed change={} new velocity={}",
+        distance, previous_distance, velocity_change, velocity.y
+    );
 }
 
 fn agent_normal_behavior(agent: &mut DriverAgent, velocity: &mut Velocity, transform: &Transform) {
@@ -194,15 +238,26 @@ fn agent_changing_lanes_behavior(
 }
 
 pub fn collision_system(
-    mut collider_query: Query<(Entity, &Transform, &mut Sprite, &mut DriverAgent), With<Car>>,
+    mut collider_query: Query<
+        (
+            Entity,
+            &Transform,
+            &mut Sprite,
+            &mut DriverAgent,
+            &mut Velocity,
+        ),
+        With<Car>,
+    >,
 ) {
     let mut add_intersections: HashMap<Entity, f32> = HashMap::new();
     let mut clear_intersections: HashMap<Entity, f32> = HashMap::new();
 
-    for (entity_1, transform_1, _, _) in &collider_query {
+    for (entity_1, transform_1, _, _, _) in &collider_query {
         let mut has_collision = false;
 
-        for (entity_2, transform_2, _, _) in &collider_query {
+        // TODO: don't calculate if agent already has a collision?
+
+        for (entity_2, transform_2, _, _, _) in &collider_query {
             if entity_1 == entity_2 {
                 continue;
             }
@@ -233,7 +288,19 @@ pub fn collision_system(
 
             if let Some(intersection) = raycast.aabb_intersection_at(&aabb2d) {
                 // println!("Got intersection at {:?}", intersection);
-                add_intersections.insert(entity_1, intersection);
+
+                // guarantee the closest intersection in case there are multiple
+                match add_intersections.get_mut(&entity_1) {
+                    Some(value) => {
+                        if intersection < *value {
+                            *value = intersection;
+                        }
+                    }
+                    None => {
+                        // doesn't exist yet; insert
+                        add_intersections.insert(entity_1, intersection);
+                    }
+                }
 
                 has_collision = true;
                 // TODO: if we could guarantee we saw the closest car (sort by distance?), could break here
@@ -246,13 +313,25 @@ pub fn collision_system(
         }
     }
 
-    for (entity_id, intersection) in add_intersections {
+    for (entity_id, intersection_distance) in add_intersections {
         if let Ok(mut entity) = collider_query.get_mut(entity_id) {
             entity.2.color = Color::RED;
-            entity.3.collision_information.front_distance = intersection;
+
+            // set previous then current
+            entity.3.collision_information.last_front_distance =
+                entity.3.collision_information.front_distance;
+
+            entity.3.collision_information.front_distance = intersection_distance;
+
+            // made contact with an object: come to a full stop
+            if intersection_distance <= 0. {
+                entity.4.x = 0.;
+                entity.4.y = 0.;
+            }
         }
     }
-    for (entity_id, intersection) in clear_intersections {
+
+    for (entity_id, _) in clear_intersections {
         if let Ok(mut entity) = collider_query.get_mut(entity_id) {
             entity.2.color = CAR_COLOR;
             entity.3.collision_information.front_distance = -1.;

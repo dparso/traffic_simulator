@@ -2,17 +2,16 @@ use bevy::prelude::*;
 
 // WINDOW
 pub const WINDOW_WIDTH: f32 = 1280.;
-pub const WINDOW_HEIGHT: f32 = 720.;
+pub const WINDOW_HEIGHT: f32 = 1440.;
 pub const WINDOW_WIDTH_HALF: f32 = WINDOW_WIDTH / 2.;
 pub const WINDOW_HEIGHT_HALF: f32 = WINDOW_HEIGHT / 2.;
 
 // CAR
-pub const CAR_SPAWN_BOTTOM: f32 = -300.;
 pub const CAR_SIZE: Vec3 = Vec3::new(20., 40., 0.);
 pub const CAR_INITIAL_DIRECTION: Vec2 = Vec2::new(0., 0.5);
 pub const CAR_GAS_POWER: f32 = 10.; // how much velocity the car gains per frame
-pub const CAR_BRAKE_POWER: f32 = 12.;
-pub const CAR_SIGHT_DISTANCE: f32 = 200.;
+pub const CAR_BRAKE_POWER: f32 = 15.;
+pub const CAR_SIGHT_DISTANCE: f32 = 300.;
 
 pub const LANE_WIDTH: f32 = 40.;
 pub const LANE_STRIP_SIZE: Vec3 = Vec3::new(5., 10., 0.);
@@ -34,8 +33,8 @@ pub const WALL_THICKNESS: f32 = 10.;
 pub const LEFT_WALL: f32 = -450.;
 pub const RIGHT_WALL: f32 = 450.;
 // y coordinates
-pub const BOTTOM_WALL: f32 = -300.;
-pub const TOP_WALL: f32 = 300.;
+pub const BOTTOM_WALL: f32 = -600.;
+pub const TOP_WALL: f32 = 600.;
 
 // ENVIRONMENT
 pub const FRICTION_DECAY: f32 = 0.996;

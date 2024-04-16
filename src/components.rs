@@ -5,6 +5,7 @@ use crate::util::*;
 
 pub struct CollisionInformation {
     pub front_distance: f32, // -1 if no collision, else distance to closest car in front
+    pub last_front_distance: f32, // previous frame's value of front_distance
 }
 
 // COMPONENTS
@@ -87,6 +88,7 @@ impl CarBundle {
                 lane_target: -1,
                 collision_information: CollisionInformation {
                     front_distance: -1.,
+                    last_front_distance: -1.,
                 },
                 order: DriverOrder::Orderly,
                 temperament: DriverTemperament::Calm,
@@ -116,13 +118,14 @@ impl CarBundle {
             },
             car: Car,
             collider: Collider,
-            velocity: Velocity(CAR_INITIAL_DIRECTION),
+            velocity: Velocity(CAR_INITIAL_DIRECTION * SPEED_LIMIT),
             friction: Friction,
             driver_agent: DriverAgent {
                 driver_state: DriverState::Normal,
                 lane_target: -1,
                 collision_information: CollisionInformation {
                     front_distance: -1.,
+                    last_front_distance: -1.,
                 },
                 order,
                 temperament,
@@ -171,7 +174,7 @@ pub fn spawn_car_at_lane(
     patience: DriverPatience,
 ) {
     let car_x = lane_idx_to_center(lane_idx).x;
-    let car_y = CAR_SPAWN_BOTTOM;
+    let car_y = BOTTOM_WALL + WALL_THICKNESS;
     let car_pos = Vec3::new(car_x, car_y, 0.);
 
     commands.spawn(CarBundle::new_with_behavior(
