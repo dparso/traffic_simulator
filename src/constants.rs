@@ -13,6 +13,9 @@ pub const CAR_GAS_POWER: f32 = 10.; // how much velocity the car gains per frame
 pub const CAR_BRAKE_POWER: f32 = 15.;
 pub const CAR_SIGHT_DISTANCE: f32 = 300.;
 
+// how far to either side of the car will be checked when attempting to change lanes
+pub const CAR_SIDE_CHECK_DISTANCE: f32 = LANE_WIDTH + (CAR_SIZE.y / 2.);
+
 pub const LANE_WIDTH: f32 = 40.;
 pub const LANE_STRIP_SIZE: Vec3 = Vec3::new(5., 10., 0.);
 pub const NUM_LANES: i32 = 2;
@@ -39,3 +42,10 @@ pub const TOP_WALL: f32 = 600.;
 // ENVIRONMENT
 pub const FRICTION_DECAY: f32 = 0.996;
 pub const SPEED_LIMIT: f32 = 400.;
+
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}

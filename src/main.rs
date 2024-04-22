@@ -1,17 +1,19 @@
 use bevy::{prelude::*, window::*};
+use events::CarSpawnEvent;
 
-mod components;
-mod constants;
-mod stepping;
-mod systems;
-mod util;
+pub mod components;
+pub mod constants;
+pub mod events;
+pub mod resources;
+pub mod stepping;
+pub mod systems;
+pub mod util;
 
 use crate::components::*;
 use crate::constants::*;
+use crate::resources::*;
 use crate::systems::*;
 use crate::util::*;
-use bevy_mod_raycast::prelude::*;
-use std::f32::consts::{PI, TAU};
 
 // We can create our own gizmo config group!
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -38,7 +40,11 @@ fn main() {
         .init_gizmo_group::<MyRoundGizmos>()
         .insert_resource(components::Scoreboard { score: 0 })
         .insert_resource(ClearColor(BACKGROUND_COLOR))
+        .insert_resource(CarSpawnRequests {
+            cars_to_spawn: vec![],
+        })
         .add_event::<components::CollisionEvent>()
+        .add_event::<events::CarSpawnEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
@@ -74,6 +80,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
+    mut car_spawn_events: EventWriter<events::CarSpawnEvent>,
 ) {
     // Camera
 
@@ -100,14 +107,14 @@ fn setup(
     spawn_car_at_lane(
         0,
         &mut commands,
-        DriverOrder::Orderly,
+        DriverLawfulness::Orderly,
         DriverTemperament::Passive,
         DriverPatience::Normal,
     );
     spawn_car_at_lane(
         1,
         &mut commands,
-        DriverOrder::Orderly,
+        DriverLawfulness::Orderly,
         DriverTemperament::Passive,
         DriverPatience::Normal,
     );
@@ -161,13 +168,13 @@ fn setup(
 }
 
 fn spawn_lanes(commands: &mut Commands) {
-    let total_width = RIGHT_WALL - LEFT_WALL;
+    // let total_width = RIGHT_WALL - LEFT_WALL;
     let total_height = TOP_WALL - BOTTOM_WALL;
 
-    let num_lanes: i32 = f32::floor(total_width / LANE_WIDTH) as i32;
+    // let num_lanes: i32 = f32::floor(total_width / LANE_WIDTH) as i32;
     let num_lane_segments: i32 = f32::floor(total_height / LANE_STRIP_SIZE.y) as i32;
 
-    for i in 0..num_lanes {
+    for i in 0..NUM_LANES {
         let lane_x = lane_idx_to_screen_pos(i + 1).x;
 
         for j in 0..num_lane_segments {

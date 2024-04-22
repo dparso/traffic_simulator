@@ -3,23 +3,24 @@ use bevy::prelude::*;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub enum DriverState {
     Normal,
     ChangingLanes,
 }
 
 // axes of DriverAgent behavior:
-// order: likelihood of following rules: keeping to right lane except to pass, percentage of speed limit obeyed
+// lawfulness: likelihood of following rules: keeping to right lane except to pass, percentage of speed limit obeyed
 // temperament: acceleration rates, how close to another car they'll get
 // patience: willingness to be slowed from their maximum rate (allows a larger slowdown before attempting to pass)
 
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum DriverOrder {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DriverLawfulness {
     Chaotic,
     Orderly,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DriverTemperament {
     Psychotic,
     Aggressive,
@@ -27,7 +28,7 @@ pub enum DriverTemperament {
     Passive,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum DriverPatience {
     Enlightened,
     Patient,
@@ -94,7 +95,7 @@ pub fn driver_patience_min_speed_pct(patience: &DriverPatience) -> f32 {
     DRIVER_PATIENCE_MIN_SPEEDS[&patience]
 }
 
-// HashMap::from([(DriverOrder::Chaotic, "abc")]);
+// HashMap::from([(DriverLawfulness::Chaotic, "abc")]);
 
 pub enum WallLocation {
     Left,
@@ -136,7 +137,7 @@ pub fn lane_idx_to_screen_pos(lane_idx: i32) -> Vec3 {
     Vec3::new(LEFT_WALL + LANE_WIDTH * lane_idx as f32, BOTTOM_WALL, 0.0)
 }
 
-pub fn lane_idx_from_screen_pos(screen_pos: Vec3) -> i32 {
+pub fn lane_idx_from_screen_pos(screen_pos: &Vec3) -> i32 {
     let adjusted_x = screen_pos.x - LEFT_WALL;
 
     let lane_idx: i32 = f32::floor(adjusted_x / LANE_WIDTH) as i32;
@@ -156,7 +157,7 @@ pub fn lane_idx_to_center(lane_idx: i32) -> Vec3 {
     Vec3::new(lane_pos.x + (LANE_WIDTH / 2.), lane_pos.y, 0.0)
 }
 
-pub fn cursor_pos_to_screen_space(cursor_pos: Vec2) -> Vec2 {
+pub fn cursor_pos_to_screen_space(cursor_pos: &Vec2) -> Vec2 {
     Vec2::new(
         cursor_pos.x - WINDOW_WIDTH_HALF,
         cursor_pos.y - WINDOW_HEIGHT_HALF,

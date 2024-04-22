@@ -3,22 +3,27 @@ use bevy::prelude::*;
 use crate::constants::*;
 use crate::util::*;
 
+#[derive(Clone)]
 pub struct CollisionInformation {
     pub front_distance: f32, // -1 if no collision, else distance to closest car in front
     pub last_front_distance: f32, // previous frame's value of front_distance
 }
 
 // COMPONENTS
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Car;
 
-#[derive(Component)]
+// an entity that has a position in a certain lane
+#[derive(Component, Clone)]
+pub struct LaneEntity(pub i32);
+
+#[derive(Component, Clone)]
 pub struct Collider;
 
-#[derive(Component, Deref, DerefMut)]
+#[derive(Component, Clone, Deref, DerefMut)]
 pub struct Velocity(pub Vec2);
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Friction;
 
 #[derive(Component)]
@@ -27,12 +32,12 @@ pub struct ScoreboardUi;
 #[derive(Component)]
 pub struct Lane(pub Vec2);
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct DriverAgent {
     pub driver_state: DriverState,
     pub lane_target: i32,
     pub collision_information: CollisionInformation,
-    pub order: DriverOrder,
+    pub lawfulness: DriverLawfulness,
     pub temperament: DriverTemperament,
     pub patience: DriverPatience,
 }
@@ -54,9 +59,10 @@ pub struct Scoreboard {
 pub struct CollisionEvent;
 
 // BUNDLES
-#[derive(Bundle)]
+#[derive(Bundle, Clone)]
 pub struct CarBundle {
     car: Car,
+    lane: LaneEntity,
     sprite_bundle: SpriteBundle,
     collider: Collider,
     velocity: Velocity,
@@ -80,6 +86,7 @@ impl CarBundle {
                 ..default()
             },
             car: Car,
+            lane: LaneEntity(lane_idx_from_screen_pos(&position)),
             collider: Collider,
             velocity: Velocity(CAR_INITIAL_DIRECTION),
             friction: Friction,
@@ -90,7 +97,7 @@ impl CarBundle {
                     front_distance: -1.,
                     last_front_distance: -1.,
                 },
-                order: DriverOrder::Orderly,
+                lawfulness: DriverLawfulness::Orderly,
                 temperament: DriverTemperament::Calm,
                 patience: DriverPatience::Normal,
             },
@@ -99,7 +106,7 @@ impl CarBundle {
 
     pub fn new_with_behavior(
         position: Vec3,
-        order: DriverOrder,
+        lawfulness: DriverLawfulness,
         temperament: DriverTemperament,
         patience: DriverPatience,
     ) -> CarBundle {
@@ -117,6 +124,7 @@ impl CarBundle {
                 ..default()
             },
             car: Car,
+            lane: LaneEntity(lane_idx_from_screen_pos(&position)),
             collider: Collider,
             velocity: Velocity(CAR_INITIAL_DIRECTION * SPEED_LIMIT),
             friction: Friction,
@@ -127,7 +135,7 @@ impl CarBundle {
                     front_distance: -1.,
                     last_front_distance: -1.,
                 },
-                order,
+                lawfulness,
                 temperament,
                 patience,
             },
@@ -169,7 +177,7 @@ impl WallBundle {
 pub fn spawn_car_at_lane(
     lane_idx: i32,
     commands: &mut Commands,
-    order: DriverOrder,
+    lawfulness: DriverLawfulness,
     temperament: DriverTemperament,
     patience: DriverPatience,
 ) {
@@ -179,7 +187,7 @@ pub fn spawn_car_at_lane(
 
     commands.spawn(CarBundle::new_with_behavior(
         car_pos,
-        order,
+        lawfulness,
         temperament,
         patience,
     ));
