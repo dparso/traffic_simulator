@@ -10,6 +10,11 @@ pub struct CollisionInformation {
 }
 
 // COMPONENTS
+
+/// Used to help identify main camera
+#[derive(Component)]
+pub struct MainCamera;
+
 #[derive(Component, Clone)]
 pub struct Car;
 
@@ -35,7 +40,6 @@ pub struct Lane(pub Vec2);
 #[derive(Component, Clone)]
 pub struct DriverAgent {
     pub driver_state: DriverState,
-    pub lane_target: i32,
     pub collision_information: CollisionInformation,
     pub lawfulness: DriverLawfulness,
     pub temperament: DriverTemperament,
@@ -44,6 +48,12 @@ pub struct DriverAgent {
 
 #[derive(Component)]
 pub struct LaneChanger;
+
+#[derive(Component)]
+pub struct ActiveLaneChange {
+    pub lane_change_direction: LaneChangeDirection,
+    pub lane_target: i32,
+}
 
 // RESOURCES
 #[derive(Resource)]
@@ -92,7 +102,6 @@ impl CarBundle {
             friction: Friction,
             driver_agent: DriverAgent {
                 driver_state: DriverState::Normal,
-                lane_target: -1,
                 collision_information: CollisionInformation {
                     front_distance: -1.,
                     last_front_distance: -1.,
@@ -130,7 +139,6 @@ impl CarBundle {
             friction: Friction,
             driver_agent: DriverAgent {
                 driver_state: DriverState::Normal,
-                lane_target: -1,
                 collision_information: CollisionInformation {
                     front_distance: -1.,
                     last_front_distance: -1.,

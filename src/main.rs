@@ -1,3 +1,4 @@
+use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingVolume, IntersectsVolume};
 use bevy::{prelude::*, window::*};
 use events::CarSpawnEvent;
 
@@ -43,20 +44,20 @@ fn main() {
         .insert_resource(CarSpawnRequests {
             cars_to_spawn: vec![],
         })
+        .init_resource::<CursorWorldCoords>()
         .add_event::<components::CollisionEvent>()
         .add_event::<events::CarSpawnEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
             (
-                systems::keyboard_input_system,
-                systems::mouse_click_system,
-                systems::cursor_position,
                 systems::collision_system,
                 systems::apply_friction,
                 systems::apply_velocity,
                 systems::wrap_position,
-                systems::driver_agent_system,
+                systems::agent_check_lane_change_system,
+                systems::agent_active_lane_change_system,
+                systems::agent_drive_system,
                 // systems::raycast_system,
                 //check_for_collisions, play_collision_sound
             )
@@ -65,6 +66,9 @@ fn main() {
         .add_systems(
             Update,
             (
+                systems::cursor_system,
+                systems::keyboard_input_system,
+                systems::mouse_click_system,
                 update_scoreboard,
                 // draw_example_collection,
                 draw_car_sight_lines,
@@ -95,7 +99,7 @@ fn setup(
     //     RaycastMesh::<()>::default(), // Make this mesh ray cast-able;
     // ));
 
-    commands.spawn(Camera2dBundle::default());
+    commands.spawn((Camera2dBundle::default(), MainCamera));
 
     // commands.spawn(Raycast());
 
@@ -119,7 +123,7 @@ fn setup(
         DriverPatience::Normal,
     );
 
-    // components::Scoreboard
+    // Scoreboard
     commands.spawn((
         ScoreboardUi,
         TextBundle::from_sections([
@@ -206,10 +210,11 @@ fn draw_example_collection(
     mut my_gizmos: Gizmos<MyRoundGizmos>,
     time: Res<Time>,
     q_windows: Query<&Window, With<PrimaryWindow>>,
+    cursor_coords: ResMut<CursorWorldCoords>,
 ) {
-    let sin = time.elapsed_seconds().sin() * 50.;
-    gizmos.line_2d(Vec2::Y * -sin, Vec2::splat(-80.), Color::RED);
-    gizmos.ray_2d(Vec2::Y * sin, Vec2::splat(80.), Color::GREEN);
+    // let sin = time.elapsed_seconds().sin() * 50.;
+    // gizmos.line_2d(Vec2::Y * -sin, Vec2::splat(-80.), Color::RED);
+    // gizmos.ray_2d(Vec2::Y * sin, Vec2::splat(80.), Color::GREEN);
 
     // Triangle
     // gizmos.linestrip_gradient_2d([
@@ -225,23 +230,49 @@ fn draw_example_collection(
         Color::GREEN,
     );
 
-    if let Some(position) = q_windows.single().cursor_position() {
-        let adjusted_x = position.x - WINDOW_WIDTH_HALF;
-        let adjusted_y = position.y - WINDOW_HEIGHT_HALF;
+    gizmos.line_2d(
+        Vec2::new(WINDOW_WIDTH_HALF, WINDOW_HEIGHT_HALF),
+        Vec2::new(cursor_coords.0.x, cursor_coords.0.y), // y is inverted for mouse position...
+        Color::RED,
+    );
 
-        gizmos.line_2d(
-            Vec2::new(adjusted_x, -adjusted_y), // y is inverted for mouse position...
-            Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-            Color::RED,
-        );
-    }
+    // let bottom_left = Vec2::new(0., -CAR_SIZE_HALF.y);
+    // let top_right = Vec2::new(LANE_WIDTH_DOUBLE, CAR_SIZE_HALF.y);
 
+    // let bounding_box = Aabb2d {
+    //     min: Vec2::new(-50., -50.),
+    //     max: Vec2::new(50., 50.),
+    // };
+
+    // let intersect_box = Aabb2d {
+    //     min: Vec2::new(cursor_coords.0.x - 25., cursor_coords.0.y - 25.),
+    //     max: Vec2::new(cursor_coords.0.x + 25., cursor_coords.0.y + 25.),
+    // };
+
+    // gizmos.rect_2d(Vec2::ZERO, 0., Vec2::splat(100.), Color::BLACK);
+    // gizmos.rect_2d(cursor_coords.0, 0., Vec2::splat(50.), Color::BLACK);
+    // gizmos.rect_2d(Vec2::new(), 0., Vec2::splat(20.), Color::BLACK);
+
+    // gizmos.rect_2d(bottom_left, 0., bounding_box.half_size() * 2., Color::BLACK);
     // gizmos.rect_2d(
-    //     Vec2::ZERO,
-    //     time.elapsed_seconds() / 3.,
-    //     Vec2::splat(300.),
+    //     bottom_left / 2.,
+    //     0.,
+    //     intersect_box.half_size() * 2.,
     //     Color::BLACK,
     // );
+
+    // println!("bounding={:?} intersect={:?}", bounding_box, intersect_box);
+
+    // if bounding_box.intersects(&intersect_box) {
+    //     println!("YES intersection");
+    // } else {
+    //     println!("NO intersection");
+    // }
+    // if bounding_box.contains(&intersect_box) {
+    //     println!("YES contains");
+    // } else {
+    //     println!("NO contains");
+    // }
 
     // // The circles have 32 line-segments by default.
     // my_gizmos.circle_2d(Vec2::ZERO, 120., Color::BLACK);

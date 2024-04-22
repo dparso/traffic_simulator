@@ -1,6 +1,7 @@
 use bevy::{
-    math::bounding::{Aabb2d, BoundingVolume, IntersectsVolume, RayCast2d},
+    math::bounding::{Aabb2d, Bounded2d, BoundingVolume, IntersectsVolume, RayCast2d},
     prelude::*,
+    render::primitives::Aabb,
     utils::hashbrown::HashMap,
     window::PrimaryWindow,
 };
@@ -8,7 +9,34 @@ use bevy::{
 use crate::components::*;
 use crate::constants::Direction;
 use crate::constants::*;
+use crate::resources::*;
 use crate::util::*;
+
+pub fn cursor_system(
+    mut cursor_coords: ResMut<CursorWorldCoords>,
+    // query to get the window (so we can read the current cursor position)
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    // query to get camera transform
+    q_camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+) {
+    // get the camera info and transform
+    // assuming there is exactly one main camera entity, so Query::single() is OK
+    let (camera, camera_transform) = q_camera.single();
+
+    // There is only one primary window, so we can similarly get it from the query:
+    let window = q_window.single();
+
+    // check if the cursor is inside the window and get its position
+    // then, ask bevy to convert into world coordinates, and truncate to discard Z
+    if let Some(world_position) = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
+        .map(|ray| ray.origin.truncate())
+    {
+        cursor_coords.0 = world_position;
+        println!("World coords: {}/{}", world_position.x, world_position.y);
+    }
+}
 
 pub fn apply_friction(mut query: Query<&mut Velocity, With<Friction>>) {
     for mut velocity in &mut query {
@@ -95,23 +123,7 @@ pub fn mouse_click_system(
     }
 }
 
-pub fn cursor_position(q_windows: Query<&Window, With<PrimaryWindow>>) {
-    // Games typically only have one window (the primary window)
-    if let Some(position) = q_windows.single().cursor_position() {
-        let adjusted_pos = cursor_pos_to_screen_space(&position);
-
-        let lane_idx = lane_idx_from_screen_pos(&Vec3::from((adjusted_pos.x, adjusted_pos.y, 0.0)));
-
-        println!(
-            "Cursor is inside the primary window, at logical={:?}, adjusted={}, lane={}",
-            position, adjusted_pos, lane_idx
-        );
-    } else {
-        // println!("Cursor is not in the game window.");
-    }
-}
-
-pub fn driver_agent_system(mut query: Query<(&mut DriverAgent, &mut Velocity, &Transform)>) {
+pub fn agent_drive_system(mut query: Query<(&mut DriverAgent, &mut Velocity, &Transform)>) {
     for (mut agent, mut velocity, transform) in &mut query {
         agent_accelerate_or_brake(&mut agent, &mut velocity);
 
@@ -124,27 +136,85 @@ pub fn driver_agent_system(mut query: Query<(&mut DriverAgent, &mut Velocity, &T
     }
 }
 
-pub fn agent_lane_change_system(
-    mut query: Query<(Entity, &mut DriverAgent, &mut Velocity, &Transform)>,
+pub fn agent_check_lane_change_system(
+    mut commands: Commands,
+    query: Query<(Entity, &mut DriverAgent, &Velocity, &Transform, &LaneEntity)>,
 ) {
-    for (entity_id_1, agent_1, velocity, transform_1) in &query {
-        if should_change_lanes(&agent_1, &velocity) {
-            // ??
-            // attempt_lane_move(&Direction::Right, &mut velocity, &transform);
-        }
+    let mut lane_to_transform_map: HashMap<i32, &Transform> = Default::default();
 
-        for (entity_id_2, agent_2, _, transform_2) in &query {
-            if entity_id_1 == entity_id_2 {
-                continue;
+    for (_, _, _, transform, lane) in &query {
+        lane_to_transform_map.insert(lane.0, &transform);
+    }
+
+    for (entity, agent, velocity, transform, lane) in &query {
+        match get_lane_change_direction(&agent, &velocity, lane.0) {
+            LaneChangeDirection::Left => {
+                attempt_lane_change(
+                    entity,
+                    LaneChangeDirection::Left,
+                    &transform,
+                    lane.0,
+                    &lane_to_transform_map,
+                    &mut commands,
+                );
             }
+            LaneChangeDirection::Right => {
+                attempt_lane_change(
+                    entity,
+                    LaneChangeDirection::Right,
+                    &transform,
+                    lane.0,
+                    &lane_to_transform_map,
+                    &mut commands,
+                );
+            }
+            LaneChangeDirection::None => {}
         }
     }
 }
 
-fn should_change_lanes(agent: &DriverAgent, velocity: &Velocity) -> bool {
+pub fn agent_active_lane_change_system(
+    mut commands: Commands,
+    mut query: Query<(
+        Entity,
+        &mut DriverAgent,
+        &mut Velocity,
+        &Transform,
+        &ActiveLaneChange,
+    )>,
+) {
+    for (entity, mut agent, mut velocity, transform, active_lane_change) in &mut query {
+        // TODO: negative velocity
+        // let current_lane_idx = lane_idx_from_screen_pos(transform.translation);
+        println!("moving to target lane {}", active_lane_change.lane_target);
+        let target_lane_center = lane_idx_to_center(active_lane_change.lane_target);
+        let distance_from_lane_center = target_lane_center.x - transform.translation.x;
+
+        if distance_from_lane_center > 0.5 {
+            let vec = Vec3::new(distance_from_lane_center, 0., 0.);
+            let normalized = vec.normalize();
+            velocity.x = normalized.x * CAR_GAS_POWER;
+            // println!(
+            //     "moving towards lane center={} at speed={} distance={}",
+            //     target_lane_center, velocity.x, distance_from_lane_center
+            // );
+        } else {
+            velocity.x = 0.;
+            // agent.0 = DriverState::Normal;
+            commands.entity(entity).remove::<ActiveLaneChange>();
+        }
+    }
+}
+
+fn get_lane_change_direction(
+    agent: &DriverAgent,
+    velocity: &Velocity,
+    lane_idx: i32,
+) -> LaneChangeDirection {
+    // return the direction the agent wants to change langes; does not check for feasability
     // drivers want to change lanes in two scenarios:
-    //  there's a car in front of them, and they're impatient
-    //  they're law-abiding and want to move to the right lane when not passing
+    //  1) there's a car in front of them, and they're impatient
+    //  2) they're law-abiding and want to move to the right lane when not passing
 
     let min_speed_threshold = driver_patience_min_speed_pct(&agent.patience);
 
@@ -153,18 +223,52 @@ fn should_change_lanes(agent: &DriverAgent, velocity: &Velocity) -> bool {
             "I want to pass you! velocity={} threshold={}",
             velocity.y, min_speed_threshold
         );
-        return true;
+
+        return LaneChangeDirection::Left;
     } else {
         match agent.lawfulness {
-            // TODO: orderly checks right side
             DriverLawfulness::Chaotic => {
-                return false;
+                return LaneChangeDirection::None;
             }
-            DriverLawfulness::Orderly => {}
+            DriverLawfulness::Orderly => {
+                if lane_idx < NUM_LANES - 1 {
+                    println!("I want to return to the right lane!");
+                    return LaneChangeDirection::Right;
+                }
+
+                println!("Orderly car is already at {} max={}", lane_idx, NUM_LANES);
+
+                return LaneChangeDirection::None;
+            }
         }
     }
+}
 
-    return false;
+fn attempt_lane_change(
+    entity: Entity,
+    direction: LaneChangeDirection,
+    transform: &Transform,
+    current_lane: i32,
+    lane_to_transform_map: &HashMap<i32, &Transform>,
+    commands: &mut Commands,
+) {
+    let next_lane = match direction {
+        LaneChangeDirection::Left => current_lane - 1,
+        LaneChangeDirection::Right => current_lane + 1,
+        LaneChangeDirection::None => current_lane,
+    };
+
+    if is_lane_open(next_lane, &transform, &lane_to_transform_map) {
+        println!("Lane {} is open, I want to move there!", next_lane);
+        // adding the ActiveLangeChange component means this entity will be
+        // picked up by the LaneChangeSystem and its velocity modified
+        commands.entity(entity).insert(ActiveLaneChange {
+            lane_change_direction: direction,
+            lane_target: next_lane,
+        });
+    } else {
+        println!("Lane {} is NOT open, but I want to move there!", next_lane);
+    }
 }
 
 fn agent_accelerate_or_brake(agent: &mut DriverAgent, mut velocity: &mut Velocity) {
@@ -178,56 +282,56 @@ fn agent_accelerate_or_brake(agent: &mut DriverAgent, mut velocity: &mut Velocit
     }
 }
 
-fn attempt_lane_move(
-    direction: &crate::constants::Direction,
-    mut velocity: &mut Velocity,
-    transform: &Transform,
-) {
-    let current_lane = lane_idx_from_screen_pos(&transform.translation);
-
-    match direction {
-        Direction::Left => if is_lane_open(current_lane, current_lane + 1, &transform) {},
-        Direction::Right => {}
-        _ => {}
-    }
-}
-
 fn has_obstacle_in_range(agent: &DriverAgent) -> bool {
     agent.collision_information.front_distance > -1.
 }
 
-fn is_lane_open(from_lane: i32, to_lane: i32, transform: &Transform) -> bool {
-    // cast rays from front and back of car in the direction of target lane
+fn is_lane_open(
+    target_lane: i32,
+    car_pos: &Transform,
+    lane_to_transform_map: &HashMap<i32, &Transform>,
+) -> bool {
+    // draw a box extending two lane widths to either side (will still only check intersection against cars in directly adjacent lane)
+    //    _____
+    //    |   |
+    //    |Car|
+    //    |   |
+    //    ‾‾‾‾‾
+    //    ==>
+    //    _________________
+    //    | ... |   | ... |
+    //    | ... |Car| ... |
+    //    | ... |   | ... |
+    //    ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
 
-    let top_middle = Vec2::new(
-        transform.translation.x,
-        transform.translation.y + (CAR_SIZE.y / 2.),
+    // create adjusted size box to compare against cars in target lane
+    let bottom_left = Vec2::new(
+        car_pos.translation.x - LANE_WIDTH_DOUBLE,
+        car_pos.translation.y - CAR_SIZE_HALF.y,
     );
 
-    let bottom_middle = Vec2::new(
-        transform.translation.x,
-        transform.translation.y - (CAR_SIZE.y / 2.),
+    let top_right = Vec2::new(
+        car_pos.translation.x + LANE_WIDTH_DOUBLE,
+        car_pos.translation.y + CAR_SIZE_HALF.y,
     );
 
-    let look_direction = if to_lane - from_lane > 0 {
-        Direction2d::X
-    } else {
-        Direction2d::NEG_X
+    let bounding_box = Aabb2d {
+        min: bottom_left,
+        max: top_right,
     };
 
-    if let Some(intersection) = check_intersection(
-        top_middle,
-        look_direction,
-        CAR_SIDE_CHECK_DISTANCE,
-        transform,
-    ) {}
+    for (lane_idx, &target_transform) in lane_to_transform_map {
+        if *lane_idx != target_lane {
+            continue;
+        }
 
-    if let Some(intersection) = check_intersection(
-        bottom_middle,
-        look_direction,
-        CAR_SIDE_CHECK_DISTANCE,
-        transform,
-    ) {}
+        if bounding_box.intersects(&Aabb2d::new(
+            target_transform.translation.truncate(),
+            CAR_SIZE_HALF.truncate(),
+        )) {
+            return false;
+        }
+    }
 
     true
 }
@@ -299,64 +403,13 @@ fn agent_normal_behavior(agent: &mut DriverAgent, velocity: &mut Velocity, trans
     // }
 
     let current_lane_idx = lane_idx_from_screen_pos(&transform.translation);
-    let next_lane_idx = current_lane_idx + 1;
 
     agent.driver_state = DriverState::ChangingLanes;
-    agent.lane_target = next_lane_idx;
 
     println!(
-        "current_pos={} current_lane_idx={} next_lane_idx={} target={}",
-        transform.translation, current_lane_idx, next_lane_idx, agent.lane_target
+        "current_pos={} current_lane_idx{}",
+        transform.translation, current_lane_idx
     );
-}
-
-fn agent_changing_lanes_behavior(
-    agent: &mut DriverAgent,
-    velocity: &mut Velocity,
-    transform: &Transform,
-) {
-    // TODO: negative velocity
-    // let current_lane_idx = lane_idx_from_screen_pos(transform.translation);
-    let target_lane_center = lane_idx_to_center(agent.lane_target);
-    let distance_from_lane_center = target_lane_center.x - transform.translation.x;
-
-    if distance_from_lane_center > 0.5 {
-        let vec = Vec3::new(distance_from_lane_center, 0., 0.);
-        let normalized = vec.normalize();
-        velocity.x = normalized.x * CAR_GAS_POWER;
-        // println!(
-        //     "moving towards lane center={} at speed={} distance={}",
-        //     target_lane_center, velocity.x, distance_from_lane_center
-        // );
-    } else {
-        velocity.x = 0.;
-        // agent.0 = DriverState::Normal;
-    }
-}
-
-pub fn check_intersection(
-    origin: Vec2,
-    direction: Direction2d,
-    max: f32,
-    target: &Transform,
-) -> Option<f32> {
-    let raycast = RayCast2d::new(origin, direction, max);
-
-    let box_start = Vec2::new(
-        target.translation.x - (target.scale.x / 2.),
-        target.translation.y - (target.scale.y / 2.),
-    );
-    let box_end = Vec2::new(
-        target.translation.x + (target.scale.x / 2.),
-        target.translation.y + (target.scale.y / 2.),
-    );
-
-    let aabb2d = Aabb2d {
-        min: box_start,
-        max: box_end,
-    };
-
-    raycast.aabb_intersection_at(&aabb2d)
 }
 
 pub fn collision_system(
@@ -389,9 +442,12 @@ pub fn collision_system(
 
             let car_front = get_car_front_middle(transform_1);
 
-            if let Some(intersection) =
-                check_intersection(car_front, Direction2d::Y, CAR_SIGHT_DISTANCE, transform_2)
-            {
+            if let Some(intersection) = check_raycast_intersection(
+                car_front,
+                Direction2d::Y,
+                CAR_SIGHT_DISTANCE,
+                transform_2,
+            ) {
                 // println!("Got intersection at {:?}", intersection);
 
                 // guarantee the closest intersection in case there are multiple
@@ -442,4 +498,16 @@ pub fn collision_system(
             entity.3.collision_information.front_distance = -1.;
         }
     }
+}
+
+pub fn check_raycast_intersection(
+    origin: Vec2,
+    direction: Direction2d,
+    max: f32,
+    target: &Transform,
+) -> Option<f32> {
+    let raycast = RayCast2d::new(origin, direction, max);
+    let aabb2d = Aabb2d::new(target.translation.truncate(), CAR_SIZE_HALF.truncate());
+
+    raycast.aabb_intersection_at(&aabb2d)
 }

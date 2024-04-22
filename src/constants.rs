@@ -8,6 +8,7 @@ pub const WINDOW_HEIGHT_HALF: f32 = WINDOW_HEIGHT / 2.;
 
 // CAR
 pub const CAR_SIZE: Vec3 = Vec3::new(20., 40., 0.);
+pub const CAR_SIZE_HALF: Vec3 = Vec3::new(CAR_SIZE.x / 2., CAR_SIZE.y / 2., CAR_SIZE.z / 2.);
 pub const CAR_INITIAL_DIRECTION: Vec2 = Vec2::new(0., 0.5);
 pub const CAR_GAS_POWER: f32 = 10.; // how much velocity the car gains per frame
 pub const CAR_BRAKE_POWER: f32 = 15.;
@@ -17,6 +18,7 @@ pub const CAR_SIGHT_DISTANCE: f32 = 300.;
 pub const CAR_SIDE_CHECK_DISTANCE: f32 = LANE_WIDTH + (CAR_SIZE.y / 2.);
 
 pub const LANE_WIDTH: f32 = 40.;
+pub const LANE_WIDTH_DOUBLE: f32 = LANE_WIDTH * 2.;
 pub const LANE_STRIP_SIZE: Vec3 = Vec3::new(5., 10., 0.);
 pub const NUM_LANES: i32 = 2;
 

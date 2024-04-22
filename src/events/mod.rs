@@ -31,3 +31,8 @@ impl CarSpawnEvent {
 
     // TODO: spawn multiple
 }
+
+#[derive(Event)]
+pub struct LaneChangeEvent();
+
+// impl LaneChangeEvent {

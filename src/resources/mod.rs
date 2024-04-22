@@ -1,3 +1,4 @@
+use bevy::math::Vec2;
 use bevy::prelude::Resource;
 
 use crate::components::CarBundle;
@@ -6,3 +7,7 @@ use crate::components::CarBundle;
 pub struct CarSpawnRequests {
     pub cars_to_spawn: Vec<CarBundle>,
 }
+
+// Store the world position of the mouse cursor
+#[derive(Resource, Default)]
+pub struct CursorWorldCoords(pub Vec2);

@@ -36,6 +36,13 @@ pub enum DriverPatience {
     Wild,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum LaneChangeDirection {
+    Left,
+    Right,
+    None,
+}
+
 lazy_static! {
     pub static ref DRIVER_TEMPERAMENT_TOP_SPEEDS: HashMap<DriverTemperament, f32> = {
         let mut map = HashMap::new();
