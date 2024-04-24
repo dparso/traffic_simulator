@@ -7,10 +7,28 @@ use bevy::{
 };
 
 use crate::components::*;
-use crate::constants::Direction;
 use crate::constants::*;
+use crate::events::*;
 use crate::resources::*;
 use crate::util::*;
+
+pub fn debug_mouse_system(
+    cursor_coords: ResMut<CursorWorldCoords>,
+    mut query: Query<(&mut Text, &mut Style), With<MouseText>>,
+) {
+    let text_position = screen_space_to_world_coords(&cursor_coords.0);
+
+    let (mut text, mut style) = query.single_mut();
+
+    text.sections[0].value = get_mouse_text(&cursor_coords.0, &text_position);
+
+    // so mouse doesn't cover text
+    let buffer = Vec2::new(10., 10.);
+
+    // TODO: would like to get text width to max position against end of screen
+    style.top = Val::Px(text_position.y + buffer.y);
+    style.left = Val::Px(text_position.x + buffer.x);
+}
 
 pub fn cursor_system(
     mut cursor_coords: ResMut<CursorWorldCoords>,
@@ -34,7 +52,6 @@ pub fn cursor_system(
         .map(|ray| ray.origin.truncate())
     {
         cursor_coords.0 = world_position;
-        println!("World coords: {}/{}", world_position.x, world_position.y);
     }
 }
 
@@ -68,58 +85,11 @@ pub fn update_scoreboard(
     text.sections[1].value = scoreboard.score.to_string();
 }
 
-pub fn keyboard_input_system(
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut query: Query<(&mut Velocity, &mut Sprite), With<Car>>,
-) {
-    for (mut velocity, mut sprite) in &mut query {
-        let initial_color = sprite.color;
+pub fn draw_car_sight_lines(query: Query<&Transform, With<Car>>, mut gizmos: Gizmos) {
+    for transform in &query {
+        let line_start = get_car_front_middle(transform);
 
-        if keyboard_input.pressed(KeyCode::ArrowUp) {
-            println!("VROOM {}", velocity.y);
-            velocity.y += CAR_GAS_POWER;
-            sprite.color = Color::GREEN;
-        } else if keyboard_input.pressed(KeyCode::ArrowDown) {
-            println!("SKRRR {}", velocity.y);
-            velocity.y -= CAR_BRAKE_POWER;
-            velocity.y = f32::max(velocity.y, 0.0);
-
-            sprite.color = Color::RED;
-        } else {
-            sprite.color = initial_color;
-        }
-    }
-}
-
-pub fn mouse_click_system(
-    mouse_button_input: Res<ButtonInput<MouseButton>>,
-    q_windows: Query<&Window, With<PrimaryWindow>>,
-    mut commands: Commands,
-) {
-    if mouse_button_input.pressed(MouseButton::Left) {
-        info!("left mouse currently pressed");
-    }
-
-    if mouse_button_input.just_pressed(MouseButton::Left) {
-        info!("left mouse just pressed");
-        if let Some(position) = q_windows.single().cursor_position() {
-            let adjusted_pos = cursor_pos_to_screen_space(&position);
-
-            let lane_idx =
-                lane_idx_from_screen_pos(&Vec3::from((adjusted_pos.x, adjusted_pos.y, 0.0)));
-
-            spawn_car_at_lane(
-                lane_idx,
-                &mut commands,
-                DriverLawfulness::Orderly,
-                DriverTemperament::Calm,
-                DriverPatience::Normal,
-            );
-        }
-    }
-
-    if mouse_button_input.just_released(MouseButton::Left) {
-        info!("left mouse just released");
+        gizmos.ray_2d(line_start, Vec2::Y * CAR_SIGHT_DISTANCE, Color::GREEN);
     }
 }
 
@@ -186,7 +156,7 @@ pub fn agent_active_lane_change_system(
     for (entity, mut agent, mut velocity, transform, active_lane_change) in &mut query {
         // TODO: negative velocity
         // let current_lane_idx = lane_idx_from_screen_pos(transform.translation);
-        println!("moving to target lane {}", active_lane_change.lane_target);
+        // println!("moving to target lane {}", active_lane_change.lane_target);
         let target_lane_center = lane_idx_to_center(active_lane_change.lane_target);
         let distance_from_lane_center = target_lane_center.x - transform.translation.x;
 
@@ -219,10 +189,10 @@ fn get_lane_change_direction(
     let min_speed_threshold = driver_patience_min_speed_pct(&agent.patience);
 
     if has_obstacle_in_range(&agent) && velocity.y < min_speed_threshold {
-        println!(
-            "I want to pass you! velocity={} threshold={}",
-            velocity.y, min_speed_threshold
-        );
+        // println!(
+        //     "I want to pass you! velocity={} threshold={}",
+        //     velocity.y, min_speed_threshold
+        // );
 
         return LaneChangeDirection::Left;
     } else {
@@ -232,11 +202,11 @@ fn get_lane_change_direction(
             }
             DriverLawfulness::Orderly => {
                 if lane_idx < NUM_LANES - 1 {
-                    println!("I want to return to the right lane!");
+                    // println!("I want to return to the right lane!");
                     return LaneChangeDirection::Right;
                 }
 
-                println!("Orderly car is already at {} max={}", lane_idx, NUM_LANES);
+                // println!("Orderly car is already at {} max={}", lane_idx, NUM_LANES);
 
                 return LaneChangeDirection::None;
             }
@@ -259,7 +229,7 @@ fn attempt_lane_change(
     };
 
     if is_lane_open(next_lane, &transform, &lane_to_transform_map) {
-        println!("Lane {} is open, I want to move there!", next_lane);
+        // println!("Lane {} is open, I want to move there!", next_lane);
         // adding the ActiveLangeChange component means this entity will be
         // picked up by the LaneChangeSystem and its velocity modified
         commands.entity(entity).insert(ActiveLaneChange {
@@ -267,7 +237,7 @@ fn attempt_lane_change(
             lane_target: next_lane,
         });
     } else {
-        println!("Lane {} is NOT open, but I want to move there!", next_lane);
+        // println!("Lane {} is NOT open, but I want to move there!", next_lane);
     }
 }
 
@@ -341,12 +311,12 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
     let brake_distance_threshold =
         CAR_SIGHT_DISTANCE * driver_temperament_brake_threshold(&agent.temperament);
 
-    println!(
-        "checking distance of collision={} against threshold={} brake_distance_threshold={}",
-        distance,
-        driver_temperament_brake_threshold(&agent.temperament),
-        brake_distance_threshold
-    );
+    // println!(
+    //     "checking distance of collision={} against threshold={} brake_distance_threshold={}",
+    //     distance,
+    //     driver_temperament_brake_threshold(&agent.temperament),
+    //     brake_distance_threshold
+    // );
 
     // if distance <= brake_distance_threshold {
     //     velocity.y -= CAR_BRAKE_POWER;
@@ -357,7 +327,7 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
 
     let mut velocity_change = CAR_GAS_POWER;
 
-    println!("if distance={distance} <= brake_distance_threshold={brake_distance_threshold}");
+    // println!("if distance={distance} <= brake_distance_threshold={brake_distance_threshold}");
 
     // brake_distance_threshold is the first point at which cars will start to brake
     // when within brake_distance_threshold AND tail_distance, cars will always brake
@@ -369,17 +339,17 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
         let tail_threshold = driver_temperament_tail_threshold(&agent.temperament);
         let tail_distance = CAR_SIZE.y * tail_threshold;
 
-        println!("if distance={distance} < tail_distance={tail_distance} OR if distance_difference={distance_difference} > 0. ");
+        // println!("if distance={distance} < tail_distance={tail_distance} OR if distance_difference={distance_difference} > 0. ");
 
         if distance < tail_distance {
             // car ahead is getting closer; don't accelerate as quickly
-            println!("within tail; braking");
+            // println!("within tail; braking");
             velocity_change = -CAR_BRAKE_POWER;
         } else if distance_difference > 0. {
             // car ahead is moving away; accelerate a bit faster
-            println!("pulling away; accelerating");
+            // println!("pulling away; accelerating");
         } else {
-            println!("approaching; braking");
+            // println!("approaching; braking");
             velocity_change = -CAR_BRAKE_POWER;
         }
     } // else not within braking distance; continue accelerating
@@ -391,10 +361,10 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
     velocity.y += velocity_change;
     velocity.y = f32::max(velocity.y, 0.);
 
-    println!(
-        "distance={} previous_distance={} speed change={} new velocity={}",
-        distance, previous_distance, velocity_change, velocity.y
-    );
+    // println!(
+    //     "distance={} previous_distance={} speed change={} new velocity={}",
+    //     distance, previous_distance, velocity_change, velocity.y
+    // );
 }
 
 fn agent_normal_behavior(agent: &mut DriverAgent, velocity: &mut Velocity, transform: &Transform) {
@@ -402,14 +372,14 @@ fn agent_normal_behavior(agent: &mut DriverAgent, velocity: &mut Velocity, trans
     //     velocity.y += CAR_GAS_POWER;
     // }
 
-    let current_lane_idx = lane_idx_from_screen_pos(&transform.translation);
+    let current_lane_idx = lane_idx_from_screen_pos(&transform.translation.truncate());
 
     agent.driver_state = DriverState::ChangingLanes;
 
-    println!(
-        "current_pos={} current_lane_idx{}",
-        transform.translation, current_lane_idx
-    );
+    // println!(
+    //     "current_pos={} current_lane_idx{}",
+    //     transform.translation, current_lane_idx
+    // );
 }
 
 pub fn collision_system(
@@ -417,12 +387,13 @@ pub fn collision_system(
         (
             Entity,
             &Transform,
-            &mut Sprite,
+            &mut Handle<ColorMaterial>,
             &mut DriverAgent,
             &mut Velocity,
         ),
         With<Car>,
     >,
+    mut materials: ResMut<Assets<ColorMaterial>>, // for changing car color on collision
 ) {
     let mut add_intersections: HashMap<Entity, f32> = HashMap::new();
     let mut clear_intersections: HashMap<Entity, f32> = HashMap::new();
@@ -436,7 +407,7 @@ pub fn collision_system(
             if entity_1 == entity_2 {
                 continue;
             }
-            // TODO: eliminate double checks
+            // TODO: eliminate double checks by comparing lanes
 
             // cast ray straight up (y) from transform_1 to intersect with transform_2
 
@@ -476,7 +447,10 @@ pub fn collision_system(
 
     for (entity_id, intersection_distance) in add_intersections {
         if let Ok(mut entity) = collider_query.get_mut(entity_id) {
-            entity.2.color = Color::RED;
+            let handle: &Handle<ColorMaterial> = &entity.2;
+            if let Some(material) = materials.get_mut(handle) {
+                material.color = Color::RED;
+            }
 
             // set previous then current
             entity.3.collision_information.last_front_distance =
@@ -494,7 +468,11 @@ pub fn collision_system(
 
     for (entity_id, _) in clear_intersections {
         if let Ok(mut entity) = collider_query.get_mut(entity_id) {
-            entity.2.color = CAR_COLOR;
+            let handle: &Handle<ColorMaterial> = &entity.2;
+            if let Some(material) = materials.get_mut(handle) {
+                material.color = CAR_COLOR;
+            }
+
             entity.3.collision_information.front_distance = -1.;
         }
     }

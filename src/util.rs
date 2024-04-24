@@ -3,6 +3,13 @@ use bevy::prelude::*;
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PauseState {
+    #[default]
+    Running,
+    Paused,
+}
+
 #[derive(Clone)]
 pub enum DriverState {
     Normal,
@@ -144,7 +151,7 @@ pub fn lane_idx_to_screen_pos(lane_idx: i32) -> Vec3 {
     Vec3::new(LEFT_WALL + LANE_WIDTH * lane_idx as f32, BOTTOM_WALL, 0.0)
 }
 
-pub fn lane_idx_from_screen_pos(screen_pos: &Vec3) -> i32 {
+pub fn lane_idx_from_screen_pos(screen_pos: &Vec2) -> i32 {
     let adjusted_x = screen_pos.x - LEFT_WALL;
 
     let lane_idx: i32 = f32::floor(adjusted_x / LANE_WIDTH) as i32;
@@ -171,9 +178,27 @@ pub fn cursor_pos_to_screen_space(cursor_pos: &Vec2) -> Vec2 {
     )
 }
 
+pub fn screen_space_to_world_coords(screen_space: &Vec2) -> Vec2 {
+    Vec2::new(
+        screen_space.x + WINDOW_WIDTH_HALF,
+        -screen_space.y + WINDOW_HEIGHT_HALF,
+    )
+}
+
 pub fn get_car_front_middle(transform: &Transform) -> Vec2 {
     Vec2::new(
         transform.translation.x,
         transform.translation.y + (transform.scale.y / 2.),
+    )
+}
+
+pub fn get_mouse_text(screen_space: &Vec2, text_coords: &Vec2) -> String {
+    format!(
+        "World: {}\n\
+         UI: {}\n\
+         Lane: {}",
+        screen_space,
+        text_coords,
+        lane_idx_from_screen_pos(&screen_space)
     )
 }

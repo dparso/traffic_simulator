@@ -1,6 +1,9 @@
-use bevy::math::bounding::{Aabb2d, Bounded2d, BoundingVolume, IntersectsVolume};
-use bevy::{prelude::*, window::*};
-use events::CarSpawnEvent;
+use bevy::{prelude::*, sprite::MaterialMesh2dBundle, window::*};
+use bevy_egui::{
+    egui::{self, ScrollArea},
+    EguiContexts, EguiPlugin,
+};
+use bevy_mod_picking::prelude::*;
 
 pub mod components;
 pub mod constants;
@@ -12,8 +15,8 @@ pub mod util;
 
 use crate::components::*;
 use crate::constants::*;
+use crate::events::*;
 use crate::resources::*;
-use crate::systems::*;
 use crate::util::*;
 
 // We can create our own gizmo config group!
@@ -22,7 +25,10 @@ struct MyRoundGizmos {}
 
 fn main() {
     App::new()
-        .add_plugins(
+        /////////////
+        // PLUGINS //
+        /////////////
+        .add_plugins((
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -31,7 +37,9 @@ fn main() {
                 }),
                 ..default()
             }),
-        )
+            EguiPlugin,
+            DefaultPickingPlugins,
+        ))
         .add_plugins(
             stepping::SteppingPlugin::default()
                 .add_schedule(Update)
@@ -39,14 +47,31 @@ fn main() {
                 .at(Val::Percent(35.), Val::Percent(50.)),
         )
         .init_gizmo_group::<MyRoundGizmos>()
-        .insert_resource(components::Scoreboard { score: 0 })
+        ///////////////
+        // RESOURCES //
+        ///////////////
+        .insert_resource(Scoreboard { score: 0 })
         .insert_resource(ClearColor(BACKGROUND_COLOR))
         .insert_resource(CarSpawnRequests {
             cars_to_spawn: vec![],
         })
+        .insert_resource(DebugMode(false))
         .init_resource::<CursorWorldCoords>()
-        .add_event::<components::CollisionEvent>()
+        ////////////
+        // STATES //
+        ////////////
+        .init_state::<PauseState>()
+        ////////////
+        // EVENTS //
+        ////////////
+        .add_event::<events::CollisionEvent>()
         .add_event::<events::CarSpawnEvent>()
+        .add_event::<events::DebugModeEvent>()
+        .add_event::<DoSomethingComplex>()
+        /////////////
+        // SYSTEMS //
+        /////////////
+        // .configure_sets(Update, (SomeSet.run_if(in_state(PauseState::Paused))))
         .add_systems(Startup, setup)
         .add_systems(
             FixedUpdate,
@@ -58,22 +83,27 @@ fn main() {
                 systems::agent_check_lane_change_system,
                 systems::agent_active_lane_change_system,
                 systems::agent_drive_system,
-                // systems::raycast_system,
-                //check_for_collisions, play_collision_sound
             )
+                .run_if(in_state(PauseState::Running))
                 .chain(),
         )
         .add_systems(
             Update,
             (
-                systems::cursor_system,
-                systems::keyboard_input_system,
-                systems::mouse_click_system,
-                update_scoreboard,
-                // draw_example_collection,
-                draw_car_sight_lines,
-                update_config,
+                something_complex,
+                ui_example,
                 bevy::window::close_on_esc,
+                systems::cursor_system,
+                systems::debug_mouse_system,
+                systems::keyboard_input_system,
+                systems::digit_input_system,
+                // systems::mouse_click_system,
+                systems::draw_car_sight_lines,
+                systems::debug_mode_listener,
+                // update_scoreboard,
+                // draw_example_collection,
+                // update_config,
+                // receive_greetings.run_if(on_event::<DoSomethingComplex>()),
             ),
         )
         .run();
@@ -84,40 +114,41 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     asset_server: Res<AssetServer>,
-    mut car_spawn_events: EventWriter<events::CarSpawnEvent>,
 ) {
     // Camera
-
-    // commands.spawn((Camera2dBundle::default(), RaycastSource::<()>::new_cursor()));
-    // commands.spawn((
-    //     MaterialMesh2dBundle {
-    //         mesh: meshes.add(Circle::default()).into(),
-    //         transform: Transform::default().with_scale(Vec3::splat(128.)),
-    //         material: materials.add(ColorMaterial::from(Color::PURPLE)),
-    //         ..default()
-    //     },
-    //     RaycastMesh::<()>::default(), // Make this mesh ray cast-able;
-    // ));
-
     commands.spawn((Camera2dBundle::default(), MainCamera));
 
-    // commands.spawn(Raycast());
+    commands.spawn((
+        MaterialMesh2dBundle {
+            mesh: meshes.add(Rectangle::default()).into(),
+            transform: Transform::default().with_scale(Vec3::splat(128.)),
+            material: materials.add(ColorMaterial::from(Color::PURPLE)),
+            ..default()
+        },
+        PickableBundle::default(),
+        On::<Pointer<Down>>::send_event::<DoSomethingComplex>(),
+    ));
 
     // Sound
     let ball_collision_sound = asset_server.load("sounds/breakout_collision.ogg");
     commands.insert_resource(CollisionSound(ball_collision_sound));
 
-    // Car
+    // Cars
     spawn_car_at_lane(
         0,
         &mut commands,
+        meshes.add(Rectangle::default()).into(),
+        materials.add(ColorMaterial::from(CAR_COLOR)),
         DriverLawfulness::Orderly,
         DriverTemperament::Passive,
         DriverPatience::Normal,
     );
+
     spawn_car_at_lane(
         1,
         &mut commands,
+        meshes.add(Rectangle::default()).into(),
+        materials.add(ColorMaterial::from(CAR_COLOR)),
         DriverLawfulness::Orderly,
         DriverTemperament::Passive,
         DriverPatience::Normal,
@@ -145,6 +176,25 @@ fn setup(
             position_type: PositionType::Absolute,
             top: SCOREBOARD_TEXT_PADDING,
             left: SCOREBOARD_TEXT_PADDING,
+            ..default()
+        }),
+    ));
+
+    // Mouse text
+    commands.spawn((
+        MouseText,
+        TextBundle::from_section(
+            get_mouse_text(&Vec2::splat(0.), &Vec2::splat(0.)),
+            TextStyle {
+                font: asset_server.load("fonts/FiraMono-Medium.ttf"),
+                font_size: 12.,
+                color: Color::WHITE,
+            },
+        )
+        .with_style(Style {
+            position_type: PositionType::Absolute,
+            top: Val::Px(-WINDOW_HEIGHT), // hidden until mouse in view
+            left: Val::Px(-WINDOW_WIDTH),
             ..default()
         }),
     ));
@@ -330,18 +380,41 @@ fn update_config(
     }
 }
 
-fn draw_car_sight_lines(query: Query<&Transform, With<Car>>, mut gizmos: Gizmos) {
-    for transform in &query {
-        let line_start = get_car_front_middle(transform);
-
-        gizmos.ray_2d(
-            line_start,
-            Vec2::new(0., 1.) * CAR_SIGHT_DISTANCE,
-            Color::GREEN,
+fn something_complex(
+    mut reader: EventReader<DoSomethingComplex>,
+    world: &World,
+    mut commands: Commands,
+) {
+    for event in reader.read() {
+        // commands.entity(event.0).
+        info!(
+            "Hello {:?}, you are {:?} depth units away from the pointer",
+            event.0, event.1
         );
+
+        // if let Some(ent) = world.get_entity_mut(event.0) {
+        let components_in_entity = world.inspect_entity(event.0);
+        info!("Got {} components", components_in_entity.len());
+
+        for component in components_in_entity {
+            info!("Entity {:?} has components {:?}", event.0, component);
+        }
     }
 }
-
-// fn check_for_collisions(
-//     mut commands: Commands,
-// )
+fn ui_example(mut egui_contexts: EguiContexts, mut number: Local<f32>) {
+    egui::SidePanel::left("Left").show(egui_contexts.ctx_mut(), |ui| {
+        ScrollArea::vertical()
+            .auto_shrink([false; 2])
+            .show(ui, |ui| {
+                ui.heading("Note that while a slider is being dragged, the panel is being resized, or the scrollbar is being moved, items in the 3d scene cannot be picked even if the mouse is over them.");
+                for _ in 0..100 {
+                    ui.add(egui::Slider::new(&mut *number, 0.0..=100.0));
+                }
+            })
+    });
+    egui::Window::new("Demo").show(egui_contexts.ctx_mut(), |ui| {
+        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
+            ui.heading("Note that you can select a 3d object then click on this egui window without that object being deselected!");
+        });
+    });
+}

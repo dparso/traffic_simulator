@@ -1,6 +1,8 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, sprite::*};
+use bevy_mod_picking::prelude::*;
 
 use crate::constants::*;
+use crate::events::*;
 use crate::util::*;
 
 #[derive(Clone)]
@@ -35,6 +37,9 @@ pub struct Friction;
 pub struct ScoreboardUi;
 
 #[derive(Component)]
+pub struct MouseText;
+
+#[derive(Component)]
 pub struct Lane(pub Vec2);
 
 #[derive(Component, Clone)]
@@ -55,48 +60,33 @@ pub struct ActiveLaneChange {
     pub lane_target: i32,
 }
 
-// RESOURCES
-#[derive(Resource)]
-pub struct CollisionSound(pub Handle<AudioSource>);
-
-#[derive(Resource)]
-pub struct Scoreboard {
-    pub score: usize,
-}
-
-// EVENTS
-#[derive(Event, Default)]
-pub struct CollisionEvent;
-
 // BUNDLES
 #[derive(Bundle, Clone)]
 pub struct CarBundle {
-    car: Car,
-    lane: LaneEntity,
-    sprite_bundle: SpriteBundle,
-    collider: Collider,
-    velocity: Velocity,
-    friction: Friction,
-    driver_agent: DriverAgent,
+    pub material_bundle: MaterialMesh2dBundle<ColorMaterial>,
+    pub car: Car,
+    pub lane: LaneEntity,
+    pub collider: Collider,
+    pub velocity: Velocity,
+    pub friction: Friction,
+    pub driver_agent: DriverAgent,
 }
 
 impl CarBundle {
-    pub fn new(position: Vec3) -> CarBundle {
+    pub fn new(position: Vec3, mesh: Mesh2dHandle, material: Handle<ColorMaterial>) -> CarBundle {
         CarBundle {
-            sprite_bundle: SpriteBundle {
+            material_bundle: MaterialMesh2dBundle {
+                mesh: mesh,
                 transform: Transform {
                     translation: position,
                     scale: CAR_SIZE,
                     ..default()
                 },
-                sprite: Sprite {
-                    color: CAR_COLOR,
-                    ..default()
-                },
+                material: material,
                 ..default()
             },
             car: Car,
-            lane: LaneEntity(lane_idx_from_screen_pos(&position)),
+            lane: LaneEntity(lane_idx_from_screen_pos(&position.truncate())),
             collider: Collider,
             velocity: Velocity(CAR_INITIAL_DIRECTION),
             friction: Friction,
@@ -115,25 +105,25 @@ impl CarBundle {
 
     pub fn new_with_behavior(
         position: Vec3,
+        mesh: Mesh2dHandle,
+        material: Handle<ColorMaterial>,
         lawfulness: DriverLawfulness,
         temperament: DriverTemperament,
         patience: DriverPatience,
     ) -> CarBundle {
         CarBundle {
-            sprite_bundle: SpriteBundle {
+            material_bundle: MaterialMesh2dBundle {
+                mesh: mesh,
                 transform: Transform {
                     translation: position,
                     scale: CAR_SIZE,
                     ..default()
                 },
-                sprite: Sprite {
-                    color: CAR_COLOR,
-                    ..default()
-                },
+                material: material,
                 ..default()
             },
             car: Car,
-            lane: LaneEntity(lane_idx_from_screen_pos(&position)),
+            lane: LaneEntity(lane_idx_from_screen_pos(&position.truncate())),
             collider: Collider,
             velocity: Velocity(CAR_INITIAL_DIRECTION * SPEED_LIMIT),
             friction: Friction,
@@ -185,6 +175,8 @@ impl WallBundle {
 pub fn spawn_car_at_lane(
     lane_idx: i32,
     commands: &mut Commands,
+    mesh: Mesh2dHandle,
+    material: Handle<ColorMaterial>,
     lawfulness: DriverLawfulness,
     temperament: DriverTemperament,
     patience: DriverPatience,
@@ -193,10 +185,9 @@ pub fn spawn_car_at_lane(
     let car_y = BOTTOM_WALL + WALL_THICKNESS;
     let car_pos = Vec3::new(car_x, car_y, 0.);
 
-    commands.spawn(CarBundle::new_with_behavior(
-        car_pos,
-        lawfulness,
-        temperament,
-        patience,
+    commands.spawn((
+        CarBundle::new_with_behavior(car_pos, mesh, material, lawfulness, temperament, patience),
+        PickableBundle::default(),
+        On::<Pointer<Down>>::send_event::<DoSomethingComplex>(),
     ));
 }

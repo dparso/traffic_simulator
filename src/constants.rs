@@ -7,7 +7,7 @@ pub const WINDOW_WIDTH_HALF: f32 = WINDOW_WIDTH / 2.;
 pub const WINDOW_HEIGHT_HALF: f32 = WINDOW_HEIGHT / 2.;
 
 // CAR
-pub const CAR_SIZE: Vec3 = Vec3::new(20., 40., 0.);
+pub const CAR_SIZE: Vec3 = Vec3::new(20., 40., 1.); // note: a non-zero Z size is necessary for picker (won't detect mouse hover)
 pub const CAR_SIZE_HALF: Vec3 = Vec3::new(CAR_SIZE.x / 2., CAR_SIZE.y / 2., CAR_SIZE.z / 2.);
 pub const CAR_INITIAL_DIRECTION: Vec2 = Vec2::new(0., 0.5);
 pub const CAR_GAS_POWER: f32 = 10.; // how much velocity the car gains per frame
@@ -24,7 +24,7 @@ pub const NUM_LANES: i32 = 2;
 
 // COLORS
 pub const BACKGROUND_COLOR: Color = Color::rgb(0.5, 0.5, 0.5);
-pub const CAR_COLOR: Color = Color::rgb(0.3, 0.3, 0.7);
+pub const CAR_COLOR: Color = Color::MIDNIGHT_BLUE;
 pub const SCORE_COLOR: Color = Color::rgb(1., 0.5, 0.5);
 pub const STRIPE_COLOR: Color = Color::WHITE;
 pub const TEXT_COLOR: Color = Color::rgb(0.5, 0.5, 1.);
