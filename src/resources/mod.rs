@@ -19,6 +19,3 @@ pub struct CollisionSound(pub Handle<AudioSource>);
 pub struct Scoreboard {
     pub score: usize,
 }
-
-#[derive(Resource)]
-pub struct DebugMode(pub bool);

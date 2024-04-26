@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use bevy::{prelude::*, sprite::*};
 use bevy_mod_picking::prelude::*;
 
@@ -42,6 +44,10 @@ pub struct MouseText;
 #[derive(Component)]
 pub struct Lane(pub Vec2);
 
+// add to an entity to indicate it has been selected
+#[derive(Component)]
+pub struct SelectedEntity;
+
 #[derive(Component, Clone)]
 pub struct DriverAgent {
     pub driver_state: DriverState,
@@ -49,6 +55,21 @@ pub struct DriverAgent {
     pub lawfulness: DriverLawfulness,
     pub temperament: DriverTemperament,
     pub patience: DriverPatience,
+}
+
+impl DriverAgent {
+    pub fn with_lawfulness(mut self, lawfulness: DriverLawfulness) -> Self {
+        self.lawfulness = lawfulness;
+        return self;
+    }
+    pub fn with_temperament(mut self, temperament: DriverTemperament) -> Self {
+        self.temperament = temperament;
+        return self;
+    }
+    pub fn with_patience(mut self, patience: DriverPatience) -> Self {
+        self.patience = patience;
+        return self;
+    }
 }
 
 #[derive(Component)]
@@ -188,6 +209,7 @@ pub fn spawn_car_at_lane(
     commands.spawn((
         CarBundle::new_with_behavior(car_pos, mesh, material, lawfulness, temperament, patience),
         PickableBundle::default(),
-        On::<Pointer<Down>>::send_event::<DoSomethingComplex>(),
+        On::<Pointer<Select>>::send_event::<SelectEntityEvent>(),
+        On::<Pointer<Deselect>>::send_event::<DeselectEntityEvent>(),
     ));
 }

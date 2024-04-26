@@ -85,17 +85,33 @@ pub fn update_scoreboard(
     text.sections[1].value = scoreboard.score.to_string();
 }
 
-pub fn draw_car_sight_lines(query: Query<&Transform, With<Car>>, mut gizmos: Gizmos) {
-    for transform in &query {
+pub fn draw_car_sight_lines(
+    query: Query<(&Transform, &DriverAgent), With<Car>>,
+    mut gizmos: Gizmos,
+) {
+    for (transform, agent) in &query {
         let line_start = get_car_front_middle(transform);
 
+        let tail_threshold = CAR_SIZE.y * driver_temperament_tail_threshold(&agent.temperament);
+
+        let collision_distance = agent.collision_information.front_distance;
+
         gizmos.ray_2d(line_start, Vec2::Y * CAR_SIGHT_DISTANCE, Color::GREEN);
+        gizmos.ray_2d(line_start, Vec2::Y * tail_threshold, Color::MAROON);
+        gizmos.ray_2d(
+            Vec2::new(line_start.x + 2., line_start.y),
+            Vec2::Y * collision_distance,
+            Color::GOLD,
+        );
     }
 }
 
-pub fn agent_drive_system(mut query: Query<(&mut DriverAgent, &mut Velocity, &Transform)>) {
+pub fn agent_drive_system(
+    mut query: Query<(&mut DriverAgent, &mut Velocity, &Transform)>,
+    time: Res<Time>,
+) {
     for (mut agent, mut velocity, transform) in &mut query {
-        agent_accelerate_or_brake(&mut agent, &mut velocity);
+        agent_accelerate_or_brake(&mut agent, &mut velocity, &time);
 
         // match agent.driver_state {
         //     DriverState::Normal => agent_normal_behavior(&mut agent, &mut velocity, &transform),
@@ -241,15 +257,19 @@ fn attempt_lane_change(
     }
 }
 
-fn agent_accelerate_or_brake(agent: &mut DriverAgent, mut velocity: &mut Velocity) {
-    if has_obstacle_in_range(&agent) {
-        brake_for_front(&agent, &mut velocity);
-    } else {
-        let top_speed = SPEED_LIMIT * driver_temperament_top_speed_pct(&agent.temperament);
-        if velocity.y < top_speed {
+fn agent_accelerate_or_brake(
+    agent: &mut DriverAgent,
+    mut velocity: &mut Velocity,
+    time: &Res<Time>,
+) {
+    let top_speed = SPEED_LIMIT * driver_temperament_top_speed_pct(&agent.temperament);
+    if velocity.y < top_speed {
+        if has_obstacle_in_range(&agent) {
+            brake_for_front(&agent, &mut velocity, &time);
+        } else {
             velocity.y += CAR_GAS_POWER;
         }
-    }
+    } // else nothing, friction will let the car roll back to acceptable top speed
 }
 
 fn has_obstacle_in_range(agent: &DriverAgent) -> bool {
@@ -306,7 +326,7 @@ fn is_lane_open(
     true
 }
 
-fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
+fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity, time: &Res<Time>) {
     let distance = agent.collision_information.front_distance;
     let brake_distance_threshold =
         CAR_SIGHT_DISTANCE * driver_temperament_brake_threshold(&agent.temperament);
@@ -323,34 +343,108 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
     //     velocity.y = f32::max(0., velocity.y);
     // } else {
     let previous_distance = agent.collision_information.last_front_distance;
-    let distance_difference = distance - previous_distance;
+    let distance_difference = distance - previous_distance; // negative means approaching vehicle ahead
+
+    info!("distance={distance}");
 
     let mut velocity_change = CAR_GAS_POWER;
 
     // println!("if distance={distance} <= brake_distance_threshold={brake_distance_threshold}");
 
     // brake_distance_threshold is the first point at which cars will start to brake
-    // when within brake_distance_threshold AND tail_distance, cars will always brake
-    // when within brake_distance_threshold and outside of tail_distance, cars will
-    // consider the relative speed of the car ahead: if the car is getting closer, brake
-    // if it's pulling away, accelerate
+    // cars will brake proportionately hard the closer they are to their tail threshold,
+    // which is the closest a car will follow another car
+    // TODO: should be using distance_difference as a proxy for relative speed, and
+    // have a condition for braking hard when a car is approaching very quickly
+
+    // distance = speed * time
+
+    // acceleration can only be between 0 and CAR_GAS_POWER depending on the relative speed of the car ahead
+    // it's max (CAR_GAS_POWER) when the car ahead is moving forward at a speed greater than our max speed
+
+    // TODO: braking should make us approach zero relative speed asymptotically, so we slowly slide into the min tail distance
 
     if distance <= brake_distance_threshold {
-        let tail_threshold = driver_temperament_tail_threshold(&agent.temperament);
-        let tail_distance = CAR_SIZE.y * tail_threshold;
+        let tail_threshold_pct = driver_temperament_tail_threshold(&agent.temperament);
+        let min_tail_distance = CAR_SIZE.y * tail_threshold_pct;
 
-        // println!("if distance={distance} < tail_distance={tail_distance} OR if distance_difference={distance_difference} > 0. ");
+        // always brake within tail distance
+        if distance <= min_tail_distance {
+            let power_percentage = (distance) / min_tail_distance;
 
-        if distance < tail_distance {
-            // car ahead is getting closer; don't accelerate as quickly
-            // println!("within tail; braking");
-            velocity_change = -CAR_BRAKE_POWER;
-        } else if distance_difference > 0. {
-            // car ahead is moving away; accelerate a bit faster
-            // println!("pulling away; accelerating");
+            let brake_percentage = 1. - power_percentage;
+            let brake_power = CAR_BRAKE_POWER * brake_percentage; // brake_percentage;
+
+            // TODO: the problem with this current setup is that it doesn't allow for a car which is already moving the same speed as the car ahead
+            // but isn't within the min tail distance to actually accelerate up to the point of the min tail distance
+            // to solve this, would need to add a condition where as long as we're outside of the min tail distance and the relative speed is low, we can accelerate
+            // at a proportionally low rate (faster the farther we are from min tail distance)
+
+            velocity_change = -brake_power;
+
+            info!("BRAKE_MIN tail_threshold_pct={tail_threshold_pct}, min_tail_distance={min_tail_distance}, distance={distance}, \
+            min_tail_distance={min_tail_distance}, power_percentage={power_percentage}, brake_power={brake_power}, distance_difference={distance_difference}");
+
+            // velocity_change = -CAR_BRAKE_POWER;
         } else {
-            // println!("approaching; braking");
-            velocity_change = -CAR_BRAKE_POWER;
+            // within braking distance, but outside tail distance; here, use the change in distance to approximate the relative speed
+            // of the vehicle ahead; for example, a distance difference of zero implies we are perfectly tailing the car ahead
+            // if we're still outside of the min tail distance, we can accelerate, so long as we aren't approaching at a reckless speed
+            let relative_speed = distance_difference / time.delta_seconds();
+            let relative_speed_threshold_for_accel = 5. * CAR_GAS_POWER;
+
+            info!("relative_speed={relative_speed} speed={}", velocity.y);
+
+            let adjusted_distance = distance - min_tail_distance;
+            let adjusted_threshold = f32::max(brake_distance_threshold - min_tail_distance, 0.); // max for non-zero div
+            let power_percentage = adjusted_distance / adjusted_threshold;
+            let speed_percentage = (relative_speed / CAR_GAS_POWER).clamp(0., 1.);
+
+            // very low negative relative speeds mean we are quickly approaching car ahead; any positive relative speed means the car ahead
+            // is faster / pulling away; allow proportionate acceleration unless we're approaching quickly
+            if relative_speed > -relative_speed_threshold_for_accel {
+                // allow acceleration, but accelerate proportionately to distance to min tail distance: faster when farther, slower when closer
+
+                let gas_power = CAR_GAS_POWER * speed_percentage; // f32::abs(relative_speed);
+
+                velocity_change = gas_power;
+
+                // }
+                info!("ACCEL_REL tail_threshold_pct={tail_threshold_pct}, min_tail_distance={min_tail_distance}, adjusted_distance={adjusted_distance}, \
+                       adjusted_threshold={adjusted_threshold}, power_percentage={power_percentage}, gas_power={gas_power}, distance_difference={distance_difference}");
+
+            // if distance_difference > 0. {
+            //     // within brake threshold, but the car ahead is pulling away; can accelerate here
+            //     velocity_change = CAR_GAS_POWER;
+            } else {
+                // braking should be proportional to the distance not from the car ahead, but from this car's eventual position at its
+                // min tail threshold; 1) subtract by min_tail_distance to offset the range so that min_tail_distance is the target then
+                // 2) divide distance over threshold to scale brake percentage; 3) subtract that number from one to brake more when closer
+                let brake_percentage = 1. - speed_percentage;
+                let brake_power = CAR_BRAKE_POWER * brake_percentage; // brake_percentage;
+
+                velocity_change = -brake_power;
+
+                info!("BRAKE_REL tail_threshold_pct={tail_threshold_pct}, min_tail_distance={min_tail_distance}, adjusted_distance={adjusted_distance}, \
+                       adjusted_threshold={adjusted_threshold}, brake_percentage={brake_percentage}, brake_power={brake_power}, distance_difference={distance_difference}, speed_percentage={speed_percentage}");
+
+                // // every agent will always brake when within its minimum tail distance
+                // if distance < min_tail_distance {
+                //     info!("BIGGG {distance} {distance_difference}");
+                //     velocity_change = -CAR_BRAKE_POWER;
+                // } else {
+                //     // TODO: approaching quickly means more negative numbers (-10 is approaching faster than -5)
+                //     // would like cars to brake harder the faster they're approaching, which means you'd break slower
+                //     // the closer the diff is to 0
+                //     if distance_difference < 0. {
+                //         info!("SKRRR {distance} {distance_difference}");
+                //         velocity_change = -CAR_BRAKE_POWER * 0.5;
+                //     } else {
+                //         info!("VROOM {distance} {distance_difference}");
+                //         velocity_change = CAR_GAS_POWER;
+                //     }
+                // }
+            }
         }
     } // else not within braking distance; continue accelerating
 
@@ -358,6 +452,9 @@ fn brake_for_front(agent: &DriverAgent, velocity: &mut Velocity) {
     // let direction = Vec2::new(0., distance_difference).normalize();
 
     // TODO: this should also be encapsulated
+    // should have gas() and brake() methods that specifically apply forces
+    // then there should be a "rolling" deadzone like where distance_difference is around 0
+    // where neither happens, we just let friction take over; should make for more realistic movement
     velocity.y += velocity_change;
     velocity.y = f32::max(velocity.y, 0.);
 
@@ -456,6 +553,7 @@ pub fn collision_system(
             entity.3.collision_information.last_front_distance =
                 entity.3.collision_information.front_distance;
 
+            // intersection returns distance to the *front* of the next car; offset to give distance to rear
             entity.3.collision_information.front_distance = intersection_distance;
 
             // made contact with an object: come to a full stop

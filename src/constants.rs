@@ -43,7 +43,7 @@ pub const TOP_WALL: f32 = 600.;
 
 // ENVIRONMENT
 pub const FRICTION_DECAY: f32 = 0.996;
-pub const SPEED_LIMIT: f32 = 400.;
+pub const SPEED_LIMIT: f32 = 200.;
 
 pub enum Direction {
     Up,

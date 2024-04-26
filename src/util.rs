@@ -4,6 +4,13 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 
 #[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DebugState {
+    #[default]
+    Disabled,
+    Enabled,
+}
+
+#[derive(States, Default, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PauseState {
     #[default]
     Running,
@@ -57,6 +64,7 @@ lazy_static! {
         map.insert(DriverTemperament::Aggressive, 1.3);
         map.insert(DriverTemperament::Calm, 1.0);
         map.insert(DriverTemperament::Passive, 0.8);
+
         map
     };
     pub static ref DRIVER_PATIENCE_MIN_SPEEDS: HashMap<DriverPatience, f32> = {
@@ -65,6 +73,7 @@ lazy_static! {
         map.insert(DriverPatience::Patient, 0.7);
         map.insert(DriverPatience::Normal, 0.9);
         map.insert(DriverPatience::Wild, 1.0); // always tries to pass
+
         map
     };
     pub static ref DRIVER_TEMPERAMENT_BRAKE_THRESHOLD: HashMap<DriverTemperament, f32> = {
@@ -77,6 +86,7 @@ lazy_static! {
         map.insert(DriverTemperament::Aggressive, 0.7);
         map.insert(DriverTemperament::Calm, 1.0);
         map.insert(DriverTemperament::Passive, 1.0);
+
         map
     };
     pub static ref DRIVER_TEMPERAMENT_TAIL_THRESHOLD: HashMap<DriverTemperament, f32> = {
@@ -85,10 +95,11 @@ lazy_static! {
         // while 3.0 means a car will stay 3 car lengths behind another
 
         let mut map = HashMap::new();
-        map.insert(DriverTemperament::Psychotic, 0.1);
-        map.insert(DriverTemperament::Aggressive, 0.7);
-        map.insert(DriverTemperament::Calm, 2.0);
-        map.insert(DriverTemperament::Passive, 5.0);
+        map.insert(DriverTemperament::Psychotic, 1.5);
+        map.insert(DriverTemperament::Aggressive, 3.0);
+        map.insert(DriverTemperament::Calm, 4.5);
+        map.insert(DriverTemperament::Passive, 6.0);
+
         map
     };
 }

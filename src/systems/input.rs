@@ -19,6 +19,21 @@ const DIGIT_KEYS: [KeyCode; 10] = [
     KeyCode::Digit0,
 ];
 
+pub fn check_debug_input(
+    keyboard_input: &Res<ButtonInput<KeyCode>>,
+    debug_state: &Res<State<DebugState>>,
+    next_debug_state: &mut ResMut<NextState<DebugState>>,
+) {
+    if keyboard_input.just_pressed(KeyCode::KeyD) {
+        debug!("You pressed D!");
+        if *debug_state.get() == DebugState::Enabled {
+            next_debug_state.set(DebugState::Disabled);
+        } else {
+            next_debug_state.set(DebugState::Enabled);
+        }
+    }
+}
+
 pub fn check_pause_input(
     keyboard_input: &Res<ButtonInput<KeyCode>>,
     pause_state: &Res<State<PauseState>>,
@@ -60,21 +75,14 @@ pub fn digit_input_system(
 pub fn keyboard_input_system(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut Velocity, &Handle<ColorMaterial>), With<Car>>,
-    mut debug_writer: EventWriter<DebugModeEvent>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    debug_state: Res<State<DebugState>>,
+    mut next_debug_state: ResMut<NextState<DebugState>>,
     pause_state: Res<State<PauseState>>,
     mut next_pause_state: ResMut<NextState<PauseState>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    check_debug_input(&keyboard_input, &debug_state, &mut next_debug_state);
     check_pause_input(&keyboard_input, &pause_state, &mut next_pause_state);
-
-    if keyboard_input.just_pressed(KeyCode::Digit0) {
-        debug!("YOU PRESSED 0");
-    }
-
-    if keyboard_input.just_pressed(KeyCode::KeyD) {
-        debug!("You pressed D!");
-        debug_writer.send(DebugModeEvent);
-    }
 
     for (mut velocity, material_handle) in &mut query {
         let mut new_color_o: Option<Color> = None;

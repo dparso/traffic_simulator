@@ -17,4 +17,5 @@ opt-level = 3
 bevy = { version = "0.13.2", features = ["dynamic_linking"] }
 bevy_egui = "0.27.0"
 bevy_mod_picking = "0.18.2"
+bevy_picking_egui = "0.18.0"
 lazy_static = "1.4.0"

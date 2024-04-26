@@ -16,14 +16,24 @@ pub struct LaneChangeEvent();
 // impl LaneChangeEvent {
 
 #[derive(Event)]
-pub struct DoSomethingComplex(pub Entity, pub f32);
+pub struct SelectEntityEvent(pub Entity);
 
-impl From<ListenerInput<Pointer<Down>>> for DoSomethingComplex {
-    fn from(event: ListenerInput<Pointer<Down>>) -> Self {
-        DoSomethingComplex(event.target, event.hit.depth)
+impl From<ListenerInput<Pointer<Select>>> for SelectEntityEvent {
+    fn from(event: ListenerInput<Pointer<Select>>) -> Self {
+        SelectEntityEvent(event.target)
     }
 }
 
-// change in debug mode
 #[derive(Event)]
-pub struct DebugModeEvent;
+pub struct DeselectEntityEvent(pub Entity);
+
+impl From<ListenerInput<Pointer<Deselect>>> for DeselectEntityEvent {
+    fn from(event: ListenerInput<Pointer<Deselect>>) -> Self {
+        DeselectEntityEvent(event.target)
+    }
+}
+
+// requests to modify an entity with `SelectedEntity` component
+// by replacing its `DriverAgent` component with the provided
+#[derive(Event)]
+pub struct ModifySelectedDriverAgentEvent(pub DriverAgent);

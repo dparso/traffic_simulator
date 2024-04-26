@@ -1,8 +1,18 @@
-use bevy::{prelude::*, sprite::MaterialMesh2dBundle, window::*};
-use bevy_egui::{
+use std::any::{Any, TypeId};
+use std::collections::HashSet;
+
+use crate::bevy_egui::{
     egui::{self, ScrollArea},
     EguiContexts, EguiPlugin,
 };
+
+use bevy::{
+    ecs::component::ComponentInfo, log::LogPlugin, prelude::*, sprite::MaterialMesh2dBundle,
+    window::*,
+};
+
+use bevy_picking_egui::*;
+
 use bevy_mod_picking::prelude::*;
 
 pub mod components;
@@ -29,15 +39,21 @@ fn main() {
         // PLUGINS //
         /////////////
         .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT)
-                        .with_scale_factor_override(1.),
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT)
+                            .with_scale_factor_override(1.),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(LogPlugin {
+                    level: bevy::log::Level::INFO,
                     ..default()
                 }),
-                ..default()
-            }),
             EguiPlugin,
+            EguiBackend,
             DefaultPickingPlugins,
         ))
         .add_plugins(
@@ -55,19 +71,20 @@ fn main() {
         .insert_resource(CarSpawnRequests {
             cars_to_spawn: vec![],
         })
-        .insert_resource(DebugMode(false))
         .init_resource::<CursorWorldCoords>()
         ////////////
         // STATES //
         ////////////
+        .init_state::<DebugState>()
         .init_state::<PauseState>()
         ////////////
         // EVENTS //
         ////////////
         .add_event::<events::CollisionEvent>()
         .add_event::<events::CarSpawnEvent>()
-        .add_event::<events::DebugModeEvent>()
-        .add_event::<DoSomethingComplex>()
+        .add_event::<SelectEntityEvent>()
+        .add_event::<DeselectEntityEvent>()
+        .add_event::<ModifySelectedDriverAgentEvent>()
         /////////////
         // SYSTEMS //
         /////////////
@@ -90,20 +107,21 @@ fn main() {
         .add_systems(
             Update,
             (
-                something_complex,
+                select_event_listener,
+                deselect_event_listener,
+                modify_entity_driver_agent_listener,
+                systems::draw_car_sight_lines,
                 ui_example,
-                bevy::window::close_on_esc,
                 systems::cursor_system,
                 systems::debug_mouse_system,
                 systems::keyboard_input_system,
                 systems::digit_input_system,
+                bevy::window::close_on_esc,
                 // systems::mouse_click_system,
-                systems::draw_car_sight_lines,
-                systems::debug_mode_listener,
                 // update_scoreboard,
                 // draw_example_collection,
                 // update_config,
-                // receive_greetings.run_if(on_event::<DoSomethingComplex>()),
+                // receive_greetings.run_if(on_event::<SelectEntityEvent>()),
             ),
         )
         .run();
@@ -126,7 +144,8 @@ fn setup(
             ..default()
         },
         PickableBundle::default(),
-        On::<Pointer<Down>>::send_event::<DoSomethingComplex>(),
+        On::<Pointer<Select>>::send_event::<SelectEntityEvent>(),
+        On::<Pointer<Deselect>>::send_event::<DeselectEntityEvent>(),
     ));
 
     // Sound
@@ -150,7 +169,7 @@ fn setup(
         meshes.add(Rectangle::default()).into(),
         materials.add(ColorMaterial::from(CAR_COLOR)),
         DriverLawfulness::Orderly,
-        DriverTemperament::Passive,
+        DriverTemperament::Aggressive,
         DriverPatience::Normal,
     );
 
@@ -380,41 +399,186 @@ fn update_config(
     }
 }
 
-fn something_complex(
-    mut reader: EventReader<DoSomethingComplex>,
-    world: &World,
-    mut commands: Commands,
+fn select_event_listener(mut reader: EventReader<SelectEntityEvent>, mut commands: Commands) {
+    for event in reader.read() {
+        info!("Adding SelectedEntity to {:?}", event.0);
+        commands.entity(event.0).insert(SelectedEntity);
+    }
+}
+
+fn deselect_event_listener(mut reader: EventReader<DeselectEntityEvent>, mut commands: Commands) {
+    for event in reader.read() {
+        info!("Removing SelectedEntity from {:?}", event.0);
+        commands.entity(event.0).remove::<SelectedEntity>();
+    }
+}
+
+fn modify_entity_driver_agent_listener(
+    mut reader: EventReader<ModifySelectedDriverAgentEvent>,
+    mut query: Query<(Entity, &mut DriverAgent), With<SelectedEntity>>,
 ) {
     for event in reader.read() {
-        // commands.entity(event.0).
-        info!(
-            "Hello {:?}, you are {:?} depth units away from the pointer",
-            event.0, event.1
-        );
-
-        // if let Some(ent) = world.get_entity_mut(event.0) {
-        let components_in_entity = world.inspect_entity(event.0);
-        info!("Got {} components", components_in_entity.len());
-
-        for component in components_in_entity {
-            info!("Entity {:?} has components {:?}", event.0, component);
+        info!("Got request to modify entity");
+        if let Ok(mut agent) = query.get_single_mut() {
+            info!("Doing it!");
+            agent.1.driver_state = event.0.driver_state.clone();
+            agent.1.lawfulness = event.0.lawfulness.clone();
+            agent.1.temperament = event.0.temperament.clone();
+            agent.1.patience = event.0.patience.clone();
         }
     }
 }
-fn ui_example(mut egui_contexts: EguiContexts, mut number: Local<f32>) {
-    egui::SidePanel::left("Left").show(egui_contexts.ctx_mut(), |ui| {
-        ScrollArea::vertical()
-            .auto_shrink([false; 2])
-            .show(ui, |ui| {
-                ui.heading("Note that while a slider is being dragged, the panel is being resized, or the scrollbar is being moved, items in the 3d scene cannot be picked even if the mouse is over them.");
-                for _ in 0..100 {
-                    ui.add(egui::Slider::new(&mut *number, 0.0..=100.0));
-                }
-            })
-    });
-    egui::Window::new("Demo").show(egui_contexts.ctx_mut(), |ui| {
+
+fn debug_ui_no_entity(egui_contexts: &mut EguiContexts) {
+    egui::Window::new("Entity Editor").show(egui_contexts.ctx_mut(), |ui| {
         ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
-            ui.heading("Note that you can select a 3d object then click on this egui window without that object being deselected!");
+            ui.heading("Please select an entity!");
+        })
+    });
+}
+
+fn debug_ui_with_entity(
+    egui_contexts: &mut EguiContexts,
+    entity: Entity,
+    driver_agent: &DriverAgent,
+    modify_entity_writer: &mut EventWriter<ModifySelectedDriverAgentEvent>,
+) {
+    egui::Window::new("Entity Editor").show(egui_contexts.ctx_mut(), |ui| {
+        ScrollArea::both().auto_shrink([false; 2]).show(ui, |ui| {
+            ui.heading(format!("You have selected entity {:?}!", entity));
+            ui.horizontal(|ui| {
+                if ui
+                    .add(egui::RadioButton::new(
+                        driver_agent.temperament == DriverTemperament::Passive,
+                        "Passive",
+                    ))
+                    .clicked()
+                {
+                    info!("Sending passive!");
+                    let new_driver_agent = driver_agent
+                        .clone()
+                        .with_temperament(DriverTemperament::Passive);
+
+                    modify_entity_writer.send(ModifySelectedDriverAgentEvent(new_driver_agent));
+                }
+
+                if ui
+                    .add(egui::RadioButton::new(
+                        driver_agent.temperament == DriverTemperament::Calm,
+                        "Calm",
+                    ))
+                    .clicked()
+                {
+                    info!("Sending calm!");
+                    let new_driver_agent = driver_agent
+                        .clone()
+                        .with_temperament(DriverTemperament::Calm);
+
+                    modify_entity_writer.send(ModifySelectedDriverAgentEvent(new_driver_agent));
+                }
+
+                if ui
+                    .add(egui::RadioButton::new(
+                        driver_agent.temperament == DriverTemperament::Aggressive,
+                        "Aggressive",
+                    ))
+                    .clicked()
+                {
+                    info!("Sending aggressive!");
+                    let new_driver_agent = driver_agent
+                        .clone()
+                        .with_temperament(DriverTemperament::Aggressive);
+
+                    modify_entity_writer.send(ModifySelectedDriverAgentEvent(new_driver_agent));
+                }
+
+                if ui
+                    .add(egui::RadioButton::new(
+                        driver_agent.temperament == DriverTemperament::Psychotic,
+                        "Psychotic",
+                    ))
+                    .clicked()
+                {
+                    info!("Sending psychotic!");
+                    let new_driver_agent = driver_agent
+                        .clone()
+                        .with_temperament(DriverTemperament::Psychotic);
+
+                    modify_entity_writer.send(ModifySelectedDriverAgentEvent(new_driver_agent));
+                }
+            });
         });
     });
 }
+
+fn ui_example(
+    mut egui_contexts: EguiContexts,
+    mut number: Local<f32>,
+    pause_state: Res<State<PauseState>>,
+    debug_state: Res<State<DebugState>>,
+    // query gets all components of the selected entity for display / modification
+    query: Query<(Entity, &DriverAgent), With<SelectedEntity>>,
+    mut modify_entity_writer: EventWriter<ModifySelectedDriverAgentEvent>,
+    // world: &World,
+) {
+    // debug window shows when paused and debug mode is on
+    if pause_state.get() != &PauseState::Paused || debug_state.get() != &DebugState::Enabled {
+        return;
+    }
+
+    if let Ok(entity) = query.get_single() {
+        debug_ui_with_entity(
+            &mut egui_contexts,
+            entity.0,
+            entity.1,
+            &mut modify_entity_writer,
+        );
+    } else {
+        debug_ui_no_entity(&mut egui_contexts);
+    }
+
+    // info!("Hello {:?}, you were selected!", event.0);
+
+    // // if let Some(ent) = world.get_entity_mut(event.0) {
+
+    // for component in components_in_entity {
+    //     info!("Entity {:?} has components {:?}", event.0, component);
+    // }
+
+    // egui::SidePanel::left("Left").show(egui_contexts.ctx_mut(), |ui| {
+    //     ScrollArea::vertical()
+    //         .auto_shrink([false; 2])
+    //         .show(ui, |ui| {
+    //             ui.heading("Note that while a slider is being dragged, the panel is being resized, or the scrollbar is being moved, items in the 3d scene cannot be picked even if the mouse is over them.");
+    //             for _ in 0..100 {
+    //                 ui.add(egui::Slider::new(&mut *number, 0.0..=100.0));
+    //             }
+    //         })
+    // });
+
+    // if let Some(entity) = selected_entity {
+    //     heading_text = format!("You have selected entity {:?}!", entity);
+    // }
+}
+
+// #[derive(PartialEq)]
+// enum Enum { First, Second, Third }
+// let mut my_enum = Enum::First;
+
+// ui.radio_value(&mut my_enum, Enum::First, "First");
+
+// // is equivalent to:
+
+// if ui.add(egui::RadioButton::new(my_enum == Enum::First, "First")).clicked() {
+//     my_enum = Enum::First
+// }
+
+// this was using world to get entity info; took it out because
+// I couldn't add &World to the UI system due to a mutability conflict
+// let components_in_entity = world.inspect_entity(event.0);
+// fn to_names(component_infos: Vec<&ComponentInfo>) -> Vec<&str> {
+//     component_infos
+//         .into_iter()
+//         .map(|component_info| component_info.name()) //.type_id())
+//         .collect()
+// }
